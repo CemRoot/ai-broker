@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`2026-05-03T14:30:00+03:00`:** **Git repository + GitHub remote (CEO direktifi).** Yerelde `git init -b main`, ilk commit (**137 dosya**, `.env` / `AI_BROKER_PROJECT.md` / `ai-broker-todo.md` hariç `.gitignore` ile). **`gh repo create`** ile **private** repo [**github.com/CemRoot/ai-broker**](https://github.com/CemRoot/ai-broker), `origin` → `main` push. **`README.md`** CI badge → Actions SVG; Project status’a Git remote linki. **Sonraki adım (manuel):** Repo **Settings → Secrets and variables → Actions** içinde `AIBROKER_BASE_URL` ve `AIBROKER_INTERNAL_KEY` (cron + healthcheck için; README §9).
+
 ### Changed
 
 - **`2026-05-03T12:00:00+03:00`:** **`.gitignore` — CEO direktifi: kanonik Türkçe yol haritası ve iç checklist public GitHub’a gitmesin.** `AI_BROKER_PROJECT.md` ve `ai-broker-todo.md` ignore listesine eklendi (yorum: CEO-local planning). **`README.md`** üst blok ve §11 repo layout güncellendi — bu iki dosya public clone’da yok; yerelde tutulur; tarihçe **`CHANGELOG.md`** ile takip edilir. **`CONTRIBUTING.md`** — PR’daki kanonik doc güncellemesi notu gitignore davranışıyla uyumlu hale getirildi. **Not:** Dosyalar daha önce Git index’te takip ediliyorsa bir kerelik `git rm --cached AI_BROKER_PROJECT.md ai-broker-todo.md && git commit -m "Stop tracking CEO-local docs"` gerekir; yeni clone’larda `.gitignore` yeterli.
