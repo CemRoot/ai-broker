@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install project (with dev extras)
+        run: uv sync --frozen --all-extras
+
+      - name: Lint (ruff)
+        run: uv run ruff check app tests scripts
+
+      - name: Unit tests
+        run: uv run pytest tests/unit -q
+
+      - name: Integration tests (offline-safe ones only)
+        run: uv run pytest tests/integration -q -k "not e2e and not live"
+        continue-on-error: true

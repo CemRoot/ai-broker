@@ -1,0 +1,81 @@
+# Faz 4 — single-host stack (FastAPI + Ollama for embeddings & local LLM).
+#
+# Usage:
+#   cp .env.example .env   # fill secrets on host (never commit .env)
+#   docker compose up --build -d
+#   curl -s http://127.0.0.1:8000/health | jq .
+#
+# Telegram webhook: expose 8000 via Cloudflare Tunnel or reverse proxy; set TELEGRAM_WEBHOOK_URL.
+# GPU: see ollama service comment block.
+
+services:
+  ai-broker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VCS_REF: ${VCS_REF:-dev}
+        BUILD_DATE: ${BUILD_DATE:-1970-01-01T00:00:00Z}
+    image: ai-broker:latest
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Route Ollama to compose service (overrides localhost in .env)
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    # Hardening — drop kernel caps; allow only what uvicorn needs
+    cap_drop: ["ALL"]
+    security_opt:
+      - "no-new-privileges:true"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    # FastAPI /health is also wired from the Dockerfile; we declare it here too
+    # so `depends_on: condition: service_healthy` is consistent in compose.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 8s
+      start_period: 90s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    healthcheck:
+      # /api/tags returns JSON when the daemon is ready to serve requests.
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:11434/api/tags"]
+      interval: 30s
+      timeout: 8s
+      start_period: 30s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    # GPU (NVIDIA): uncomment on Linux hosts with nvidia-container-toolkit
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_data:

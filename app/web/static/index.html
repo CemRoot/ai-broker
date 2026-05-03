@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Broker — Symbol analysis</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #5b9fd4;
+      --err: #e06c75;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1.25rem;
+      line-height: 1.5;
+      max-width: 52rem;
+      margin-inline: auto;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.5rem; }
+    .muted { color: var(--muted); font-size: 0.875rem; margin-bottom: 1.25rem; }
+    form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: flex-end;
+      margin-bottom: 1rem;
+      padding: 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--muted); }
+    input[type="text"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem 0.65rem;
+      border-radius: 6px;
+      min-width: 8rem;
+      font-size: 1rem;
+    }
+    .checks { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; }
+    .checks label { flex-direction: row; align-items: center; gap: 0.4rem; cursor: pointer; }
+    button {
+      background: var(--accent);
+      color: #0f1419;
+      border: none;
+      padding: 0.55rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #out {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.9rem;
+      padding: 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      min-height: 6rem;
+    }
+    #out.err { color: var(--err); border-color: var(--err); }
+    .meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Symbol analysis</h1>
+  <p class="muted">Advisor output only — not financial advice. Uses <code>POST /ui/analyze</code> (enabled with <code>WEB_UI_ENABLED</code>).</p>
+  <form id="f">
+    <label>Symbol
+      <input type="text" id="sym" name="symbol" placeholder="AAPL" autocomplete="off" required />
+    </label>
+    <div class="checks">
+      <label><input type="checkbox" id="news" /> Include news</label>
+      <label><input type="checkbox" id="ext" /> Extended technical</label>
+      <label><input type="checkbox" id="toon" /> Use TOON</label>
+    </div>
+    <button type="submit" id="go">Analyze</button>
+  </form>
+  <div id="out" aria-live="polite"></div>
+  <p class="meta" id="meta"></p>
+  <script>
+    const out = document.getElementById("out");
+    const meta = document.getElementById("meta");
+    const go = document.getElementById("go");
+
+    document.getElementById("f").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const sym = document.getElementById("sym").value.trim().toUpperCase();
+      if (!sym) return;
+      const params = new URLSearchParams({ symbol: sym });
+      if (document.getElementById("news").checked) params.set("include_news", "true");
+      if (document.getElementById("ext").checked) params.set("extended", "true");
+      if (document.getElementById("toon").checked) params.set("use_toon", "true");
+
+      out.classList.remove("err");
+      out.textContent = "Loading…";
+      meta.textContent = "";
+      go.disabled = true;
+      try {
+        const r = await fetch("/ui/analyze?" + params.toString(), { method: "POST" });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          out.classList.add("err");
+          out.textContent = (data && data.detail) ? JSON.stringify(data.detail, null, 2) : (await r.text()) || r.statusText;
+          meta.textContent = "HTTP " + r.status;
+          return;
+        }
+        const text = (data.llm && data.llm.text) ? data.llm.text : JSON.stringify(data, null, 2);
+        out.textContent = text;
+        const m = data.llm && data.llm.model ? data.llm.model : "";
+        meta.textContent = m ? ("Model: " + m) : "";
+      } catch (err) {
+        out.classList.add("err");
+        out.textContent = String(err);
+      } finally {
+        go.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

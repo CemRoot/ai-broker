@@ -1,0 +1,44 @@
+name: healthcheck
+
+# Hourly liveness probe against /health. Fails the job (and emails the repo
+# owner via GitHub's default workflow-failure notification) when the broker
+# returns a non-200 or its asyncpg pool/Telegram bot are not ready.
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: healthcheck
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: GET /health
+        env:
+          BASE_URL: ${{ secrets.AIBROKER_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BASE_URL" ]; then
+            echo "::warning::AIBROKER_BASE_URL not set; skipping."
+            exit 0
+          fi
+          payload=$(curl -fsS --max-time 15 "$BASE_URL/health")
+          echo "$payload"
+          python - <<'PY'
+          import json, os, sys
+          d = json.loads(os.popen(f"curl -fsS --max-time 15 {os.environ['BASE_URL']}/health").read())
+          fail = []
+          if d.get("status") != "ok": fail.append("status!=ok")
+          tg = d.get("telegram", {})
+          if not tg.get("handlers_ready"): fail.append("telegram handlers not ready")
+          mem = d.get("memory_db", {})
+          if not mem.get("asyncpg_pool_ready"): fail.append("asyncpg pool not ready")
+          if fail:
+              print("::error::healthcheck failed:", ", ".join(fail)); sys.exit(1)
+          print("::notice::healthcheck OK")
+          PY

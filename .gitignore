@@ -1,0 +1,78 @@
+# ── Secrets (NEVER commit) ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+.secrets/
+secrets/
+
+# ── Python ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ── Virtual environments ───────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Build / packaging ──────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+*.egg
+*.pkl
+ai_broker.egg-info/
+
+# ── Test / coverage / type-check caches ────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
+# ── Editors / IDE / OS ─────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Cursor / agent local data (never share) ────────────────────────────
+.cursor/
+.agents/
+agent-transcripts/
+skills-lock.json
+
+# ── CEO-local planning (Turkish roadmap + internal checklist; public GitHub’da paylaşılmaz)
+AI_BROKER_PROJECT.md
+ai-broker-todo.md
+
+# ── Logs / runtime artefacts ───────────────────────────────────────────
+logs/
+*.log
+results/
+ollama_data/
+terminals/
+
+# ── Upstream mirrors (see external/README.md; not vendored) ────────────
+external/PokieTicker/
+external/toon/
+
+# ── Docker local overrides ─────────────────────────────────────────────
+docker-compose.override.yml
+.docker/
+
+# ── Node / playwright (only if used locally) ───────────────────────────
+node_modules/
+playwright-report/
+test-results/

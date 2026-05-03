@@ -1,0 +1,338 @@
+# Changelog
+
+Short, dated decision log for **Cursor and developers**. Full architecture lives in `AI_BROKER_PROJECT.md`.
+
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+### Changed
+
+- **`2026-05-03T12:00:00+03:00`:** **`.gitignore` — CEO direktifi: kanonik Türkçe yol haritası ve iç checklist public GitHub’a gitmesin.** `AI_BROKER_PROJECT.md` ve `ai-broker-todo.md` ignore listesine eklendi (yorum: CEO-local planning). **`README.md`** üst blok ve §11 repo layout güncellendi — bu iki dosya public clone’da yok; yerelde tutulur; tarihçe **`CHANGELOG.md`** ile takip edilir. **`CONTRIBUTING.md`** — PR’daki kanonik doc güncellemesi notu gitignore davranışıyla uyumlu hale getirildi. **Not:** Dosyalar daha önce Git index’te takip ediliyorsa bir kerelik `git rm --cached AI_BROKER_PROJECT.md ai-broker-todo.md && git commit -m "Stop tracking CEO-local docs"` gerekir; yeni clone’larda `.gitignore` yeterli.
+
+### Removed
+
+- **`2026-05-03T10:52:00+03:00`:** **`scripts/truth_step1.png`** ve **`truth_step2.png`** (~912 KB toplam) — dokümante referans yok; Truth OAuth debug ekran görüntüsü artığı → **silindi**.
+
+- **`2026-05-03T10:45:00+03:00`:** **`experiments/`, `results/`, `scripts/` CEO denetimi — güvensiz / dublike dosyalar yeniden temizlendi.** Önceki CTO turunda (CHANGELOG `2026-05-03T02:50:00+03:00`) silinmiş olması gereken script’ler repo’ya geri sızmıştı: **`scripts/truth_oauth.py`** — Truth Social için **düz metin `CLIENT_ID` / `CLIENT_SECRET` / kullanıcı adı / şifre** içeriyordu (repo kuralı ihlali + güvenlik olayı); **kalıcı silindi**, CEO’nun Truth hesabında **şifre rotasyonu** önerilir. **`scripts/truth_get_token.py`** (Playwright ile token interception — bakım yükü), **`scripts/test_truth_connection.py`** (kırık `from app.core.config import settings` import’u), **`scripts/init_paper_db.py`** (`apply_sql_schemas.py` ile superseded) → **silindi**. **`scripts/truth_oauth_token.py`** korundu — kaynakta secret yok; Mastodon uyumlu OAuth + `.env` yazımı için tek dokümante CLI. **`scripts/.gitkeep`** gereksizdi (klasör dolu) → silindi. **`experiments/model_race/`** (`faz0_test.py`, `faz0_embed_test.py`) ve **`results/*.json`** kanonik Faz 0 benchmark çıktıları — dokunulmadı; **`experiments/README.md`** eklendi (kapsam + çalıştırma notu). **`results/`** `.gitignore`’da kalmaya devam eder (lokal artefact).
+
+- **`2026-05-03T09:15:00+03:00`:** **Boş kök dizinler ve orphan kök dosyaları (CEO CT).** Repo kökündeki **``docker/``** ve **``config/``** klasörleri yalnızca boş ``.gitkeep`` içeriyordu; gerçek Docker tanımı kök **``Dockerfile``** + **``docker-compose.yml``** + ``.dockerignore`` içinde — placeholder klasörler **tamamen silindi**. **``test_db.py``** (repo kökü) — tek seferlik Supabase ``trade_memories`` AMD probe; hiçbir script/README/import zinciri yok, CHANGELOG'ta daha önce silinmiş sayılıyordu ama dosya geri gelmişti → **kalıcı olarak silindi**. **``skills-lock.json``** — Cursor agent skill hash kilidi; uygulama koduna ait değil → **silindi** ve **``.gitignore``**'a ``skills-lock.json`` eklendi (yeniden oluşursa commit'e girmez).
+
+### Added
+
+- **`2026-05-03T06:30:00+03:00`:** **Genişletilmiş veri katmanı — CNN Fear & Greed Index entegrasyonu (CEO direktifi: `AI_BROKER_PROJECT.md` "Korku & Açgözlülük göstergeleri" bölümü).** Yeni `app/services/macro/` modülü + `CNNFearGreedClient` (`cnn_fear_greed.py`); public CNN dataviz endpoint'i (`https://production.dataviz.cnn.io/index/fearandgreed/graphdata/{YYYY-MM-DD}`) Cloudflare-friendly başlıklarla (User-Agent + Origin: cnn.com + Referer). **Tek HTTP GET → 4 yeni sinyal:** composite F&G score (0-100) + 1-week/1-month delta, **Put/Call options sub-score** (kanonik dokümandaki "Put/Call Ratio" satırını ayrı API gerektirmeden karşılıyor, çünkü CBOE feed'ini CNN zaten aggregate ediyor), VIX sub-score (yfinance `^VIX` çağrımıza cross-check), Safe-haven demand, Junk-bond demand. `_get_macro_context` zenginleştirildi; settings flag `macro_fear_greed_enabled` (default `True`). **Canlı doğrulama (2026-05-03):** F&G 66.6 (greed) **+52.8 puan vs 1 ay önce (13.7 extreme fear)** = büyük risk-on rotasyon; Put/Call 37.6 (fear) = options vs stocks **divergence** (PaperAgent için tepe yakını sinyali); Safe-haven 96.2 (extreme greed). yfinance `^CPC`/`^CPCE`/`^CPCI` Yahoo'dan **delisted** olduğu doğrulandı → CNN endpoint'i tek doğru kanal.
+- **`2026-05-03T06:30:00+03:00`:** **Genişletilmiş veri katmanı — kapsam dışı bırakılanlar (CTO kararı, dated).** Kanonik dokümandaki *Sosyal Duyarlılık* satırlarından **Google Trends, Reddit/WSB, StockTwits, Google News RSS** bu sprint'e dahil EDİLMEDİ — neden: (a) **Google Trends:** `pytrends` 2024-2025'te Google'ın rate-limit kıskacında etkin deprecated; alternatif `pytrends-modern` (Context7 score 95.1) ile RSS yolu var ama prod-grade reliability düşük (SerpApi ~$50/ay paid alt yapı gerektirir); value/cost düşük → **Q3 2026 sprint**. (b) **Reddit WSB / StockTwits:** OAuth + paid tier rate-limit + scraping zorluğu — Trump postları + Finnhub haberleri zaten retail sentiment'in büyük kısmını kapsıyor. (c) **Google News RSS:** Finnhub company-news çoğunlukla aynı feed'leri sürüyor; tekrarlayan gürültü riski. CEO onayı varsa ayrı sprint.
+- **`2026-05-03T06:00:00+03:00`:** **Tool envanteri tam canlı denetim (CEO direktifi: "diğer AI tool'ları aktif mi?").** `AI_BROKER_PROJECT.md` referans, `app/tools/definitions.py` 6 tool kayıtlı. Her birini `ToolExecutor.execute(...)` üzerinden gerçek bağımlılıklarla (T212, FMP, Finnhub, Ollama deepseek-r1, RAG, yfinance) test ettim:
+
+  | Tool | Latency | Status | Veri kalitesi |
+  |---|---:|---|---|
+  | `get_portfolio` | 1.18s | ✅ | T212 €19999.99 total / €19749.20 cash / 0 pos (TOON) |
+  | `get_macro_context` | 0.65s | ✅ | VIX 17.0 NORMAL + Fed/CPI calendar + Trump 24h DB sorgusu |
+  | `get_technical` | 0.47s | ✅ | AAPL $280.14 RSI 66.4 + 6 PokieTicker feature (ret_1d, vol_10d, ma5_vs_ma20…) |
+  | `get_news` | 125.86s | ✅ | Finnhub 5+ article + Ollama deepseek-r1 sentiment scoring |
+  | `get_memories` | 0.87s | ✅ | RAG 2 hit (LESSON + DECISION, sim ≥ 0.45 threshold) |
+  | `screen_stocks` | 0.51s | ⚠️ → ✅ **fix** | **Bug bulundu+düzeltildi** |
+
+- **`2026-05-03T06:00:00+03:00`:** **`screen_stocks` yarı-kör hatası bulundu ve düzeltildi.** **Sorun:** FMP Basic plan `/stable/company-screener` cevabı sadece statik alanlar (sector, country, marketCap) döndürüyor; `volume`/`avgVolume`/`changesPercentage` alanları YOK. `SPScreener.get_candidates()` `volume_ratio=None`, `momentum_1d=None` sentinel'lerle ranking'i `0.0` üzerinden yapıyordu → top 5 alfabetik-FMP-sırası dönüyordu (NVDA/GOOGL/AAPL/MSFT/AMZN), ranking anlamsız. **Çözüm:** `app/services/screener.py` içine `_yf_enrich(tickers)` thread-helper eklendi — ilk **30** FMP adayı için tek `yfinance.download(period=10d)` batch çağrısı; her sembol için `volume_ratio_5d = vol_today / mean(vol[-6:-1])` ve `momentum_1d_pct = (close[-1]/close[-2] - 1) × 100` hesaplanıyor; FMP'den gelen `vol_ratio`/`momentum` zaten varsa korunuyor. **Canlı doğrulama (cuma kapanışı verisiyle, 1.68s):** `AAPL vol=1.65x mom=+3.24% Tech`, `TSLA 1.18x +2.41% Cyclical`, `C 1.12x −0.42% Financials`, `PLTR 1.03x +3.57% Tech`, `CVX 1.01x −1.39% Energy` → **gerçek piyasa verisi**, sıralama anlamlı. `min_volume_ratio=1.3` filtresi de doğru çalışıyor. Pytest 95/95 yeşil.
+
+- **`2026-05-03T06:00:00+03:00`:** **`ai-broker-todo.md` "🔔 CEO Action Items" başlığı eklendi.** Sunucu kurulumu öncesi unutma riski olan 4 madde tek noktada: (1) GitHub Secrets `AIBROKER_BASE_URL` + `AIBROKER_INTERNAL_KEY` (eksikse cron'lar silently skip eder), (2) Truth Social bot hesabıyla Trump'ı follow et (Ring 1 <1s latency), (3) DeepSeek API key + V4 Pro %75 indirim 2026-05-31 deadline, (4) Hetzner CX22 spin-up + Cloudflare Tunnel.
+
+- **`2026-05-03T05:30:00+03:00`:** **Trump görsel pipeline doğrulandı + Groq vision modeli güncellendi.** Mevcut `TrumpMonitor._analyze_media` → `_analyze_impact` zinciri zaten görsel-attached postları işliyor (`media_attachments[].url` → Groq vision → 1-2 cümle özet → impact prompt'una `Image notes:` olarak eklenir). **Bug:** `GROQ_VISION_MODEL=meta-llama/llama-3.2-11b-vision-preview` ekim 2025'te Groq tarafından deprecate edilmiş → 404 döndürüyordu. **Fix:** `app/core/config.py` + `.env` + `.env.example` → `meta-llama/llama-4-scout-17b-16e-instruct` (mayıs 2026 itibarıyla aktif tek production multimodal model). **Canlı doğrulama:** GitHub-raw direct image URL → "The image depicts the logo for the Python programming language…" (model gerçekten görüntüyü işliyor; Truth Social CDN'i de direct image, redirect yok). Görselsiz path (text-only impact) **score=9.0 / bearish / AAPL+AMZN+BABA / 'Trade war escalation'** — production-grade.
+- **`2026-05-03T05:30:00+03:00`:** **In-process 60-saniye Trump REST puller (CEO direktifi: "5dk değil anında").** Üç katmanlı kapsama: **Ring 1** WebSocket (token sahibi follow ederse <1s latency), **Ring 2** *yeni:* in-process loop her `TRUMP_PULL_INTERVAL_SEC=60` saniyede `pull_recent_statuses(5)` çağırıyor (`app/main.py` lifespan task), **Ring 3** GH Actions cron `*/5 * * * *` host-down emniyet kemeri. `Settings.trump_pull_interval_sec` (`app/core/config.py`, default 60, 0 → kapalı). Yeni task `app.state.trump_pull_task`, shutdown'da düzgün cancel. WebSocket sessiz kalsa bile yeni Trump postu max 60s içinde DB'ye düşer ve emergency PaperAgent cycle tetikler.
+- **`2026-05-03T05:30:00+03:00`:** **`docs/COST_DECISION.md` (CTO → CEO finansal karar brifi).** Gerçek tüketim ölçümü (`/internal/usage`, `trade_memories`, `paper_account` canlı), aylık LLM hacim tahmini (~2.48M input + 0.59M output), 4 tier vendor matrisi (DeepSeek-V4 $0.30/$0.50, Groq llama-3.3-70b $0.59/$0.79, GPT-5/Claude $5-$30 üst sınır), 4 hosting senaryosu (Mac mini €0, Hetzner CX22 €4.51, Hetzner CX32 €8, Hetzner GPU dedicated €189-249, Ollama Cloud Pro $20 not-recommended). **CTO tavsiyesi: Tier B = Hetzner CX22 + DeepSeek-V4 + Llama 4 Scout vision + GH Actions cron + 60s in-process puller → ~€6/ay all-in.** Anchor: cycle başına LLM ~$0.0005, 13K cycle/ay'a kadar hosting domine eder. CEO action checklist + open questions (DeepSeek vs Groq default, tier upgrade trigger, live trading switch) listelendi.
+- **`2026-05-03T05:30:00+03:00`:** **RAG pipeline canlı doğrulama (CEO sorusu).** `trade_memories total=7 / with_embedding=7 / null=0` → **%100 fill**. `OllamaEmbedder.get_embedding('AAPL bullish breakout…')` → 768-dim vector, cosine(bull1, bear) = 0.6460 < cosine(bull1, bull2) = 0.6134 (anlamlı semantic ayrım nomic-embed-text aralığında). `RAGRetriever.search_similar_memories('AAPL', 'should I buy AAPL today?', top_k=3, threshold=0.3)` → `sim=0.627` ile AAPL LESSON döndü, pgvector index çalışıyor. Embedding pipeline production-ready.
+- **`2026-05-03T04:55:00+03:00`:** **Trump REST polling fallback + GitHub Actions cron (CEO direktifi: 24/7 kapsama, follow listesinden bağımsız).** TrumpMonitor'a yeni `pull_recent_statuses(limit=10)` metodu eklendi (`app/services/trump_monitor.py`) — `_truth_get_json` üzerinden `/accounts/{id}/statuses` çağrısı, her yeni status mevcut `on_trump_post` pipeline'ından geçer (impact LLM + Supabase write + Telegram alert + emergency PaperAgent). FastAPI tarafında **`POST /internal/trump/pull?limit=N`** endpoint'i (auth: `INTERNAL_API_KEY`) → `app.state.trump_monitor.pull_recent_statuses(...)`. **Canlı doğrulama (curl_cffi chrome impersonate, lokal):** `RESULT: {'fetched': 5, 'new_posts': 5, 'error_status': 200}` → REST yolu Cloudflare WAF'ı geçti, **WebSocket sessizliğinin nedeni de teşhis edildi**: token sahibi hesap @realDonaldTrump'ı follow etmediği için `stream=user` boş kalıyor. **Yeni workflow'lar (`.github/workflows/`):** `trump-pull-cron.yml` (her 5 dk → `POST /internal/trump/pull`), `healthcheck.yml` (saatte bir → `GET /health`, telegram + asyncpg ready kontrolü, fail durumunda GH default workflow-failure email), `ci.yml` (push/PR'da uv + ruff + pytest unit + offline integration). Repo secrets: `AIBROKER_BASE_URL`, `AIBROKER_INTERNAL_KEY`.
+- **`2026-05-03T04:55:00+03:00`:** **`.gitignore` profesyonelleştirildi (Github paylaşımı öncesi).** Eski 21 satırdan kategorize 60+ satıra genişledi: secrets (`.env`, `.env.*`, `!.env.example`, `*.pem`, `*.key`, `secrets/`), Python (`__pycache__`, `*.py[cod]`), venv (`.venv/`, `venv/`, `env/`), build (`build/`, `dist/`, `*.egg-info`, `*.pkl`), test caches (`.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, coverage), IDE/OS (`.idea/`, `.vscode/`, `.DS_Store`), **Cursor/agent local data (`.cursor/`, `.agents/`, `agent-transcripts/`)**, logs/runtime (`logs/`, `*.log`, `results/`, `ollama_data/`, `terminals/`), upstream mirrors (`external/PokieTicker/`, `external/toon/`), Docker overrides (`docker-compose.override.yml`, `.docker/`), Node/playwright. **Secret audit:** rg ile gsk_/sk_/Bearer/AIza/postgres-url-with-creds taraması → kaynak kodda eşleşme yok; tüm gerçek değerler yalnızca `.env` içinde (zaten gitignore'da çift kez korunuyor).
+
+### Changed
+
+- **`2026-05-03T04:55:00+03:00`:** **README.md tam yeniden yazıldı (CEO direktifi: profesyonel, İngilizce, Mermaid workflow).** Eski 129-satır karışık TR/EN README → 12 bölümlük profesyonel İngilizce yapı: badge satırı (CI/Python/FastAPI/LLM/Supabase/Docker), TOC, *What it does* tablosu, **Mermaid `flowchart LR` system architecture** (External → Core → LLM → Memory → Ops, GitHub Actions dahil), **Mermaid `sequenceDiagram` PaperAgent decision loop** (MarketClock → Tools → RAG → LLM → guards → T212 → PunishmentEngine → Telegram), hard rules + 8-tier punishment tablosu, Quick start (uv install), `.env` referans tablosu, Docker hardening notu (multi-stage, non-root, read-only fs, tmpfs, drop ALL caps, no-new-privileges, tini), Telegram komut tablosu, HTTP API tablosu (yeni `/internal/trump/pull` dahil), **24/7 deployment matrisi** (Hetzner CX22 €5/mo + Cloudflare Tunnel + GH Actions cron + opsiyonel Hetzner GEX44 €189/mo), Test/lint komutları, Repo layout, License & disclaimer. Türkçe README parçaları (eski) tamamen kaldırıldı.
+- **`2026-05-03T04:55:00+03:00`:** **Dockerfile profesyonelleştirildi (CEO görsel referansına göre).** `# syntax=docker/dockerfile:1.7` direktifi + BuildKit cache mount'lar (`--mount=type=cache` `uv` + `apt`), **OCI image labels** (`org.opencontainers.image.{title,description,source,licenses,revision,created}`) `ARG VCS_REF` / `BUILD_DATE` ile parametrik, **`tini`** PID 1 (signal handling), `useradd` non-root korundu (uid 10001), HEALTHCHECK 90s start-period, slim-bookworm tercihi açıklamayla yorumlandı (alpine'da pandas/numpy musl wheel olmadığından build'den geçer — net olarak yanlış tercih). `ARG PY_BASE` ile base image override edilebilir. **`docker-compose.yml` hardening:** `cap_drop: [ALL]`, `security_opt: no-new-privileges:true`, `read_only: true`, `tmpfs: /tmp:rw,noexec,nosuid,size=64m`, build args (`VCS_REF`, `BUILD_DATE`) compose env ile geçirilir.
+- **`2026-05-03T04:30:00+03:00`:** **TOON ikinci dalga: numerik tablo araçlarına genişletildi (CEO onayı).** `app/tools/executor.py` içinde:
+  - `_screen_stocks` → `S&P 500 SCREENER (TOON)` paketi (`candidates[N]{ticker,vol_ratio,momentum_1d_pct,sector}`).
+  - `_get_portfolio` (Supabase ledger) → `CURRENT PAPER PORTFOLIO (TOON)` paketi (`positions[N]{ticker,shares,avg_cost,current_yf,pnl_pct}`).
+  - `_get_t212_portfolio_string` → `T212 ACCOUNT (TOON)` (`positions[N]{yf,t212_ticker,qty,avg,last,ppl_pct}`).
+  - Tek nokta yardımcı: `app/tools/executor._try_toon(payload, header=...)` → toon-format yoksa `None` döner ve çağıran plaintext yoluna düşer (`use_toon_prompts=False` için de plaintext).
+  - **Tokenizer ölçümü (cl100k_base, 5 satırlık tablolar):** screener **−14.7%**, T212 portfolio **−10.6%**, Supabase portfolio benzer aralık.
+- **`2026-05-03T04:30:00+03:00`:** **News batch TOON denendi → empirical olarak fayda yok, plaintext'e geri dönüldü.** `app/services/news_pipeline.py` `build_batch_prompt(use_toon=...)` opsiyonu kaldı (gelecek için), default **`False`**. Ölçüm (50 article AAPL Finnhub batch): TOON 3849 tok / plaintext 3831 tok → **−0.5%** (string-baskın yüklerde TOON CSV-quoting overhead'i kazancı yiyor; plaintext zaten kompakt). `analyze_news_batch` `use_toon=False` çağırıyor. Yeni unit test: `test_build_batch_prompt_toon_packs_articles_table` (gelecek genişletme için TOON path'i hâlâ test edilebilir).
+
+- **`2026-05-03T04:10:00+03:00`:** **PaperAgent local-prepass artık TOON ile pack ediliyor (`USE_TOON_PROMPTS` zaten true).** `_run_cycle_local_prepass` per-ticker tool çıktılarını `{ticker, technical, news, memories}` dict satırlarına aldı; `PaperAgent._encode_prepass_payload` `toon_format.encode` ile sıkıştırıyor (paket yoksa plaintext fallback). Sistem promptu LLM'e TOON formatını tanıttı. `analysis_runner` zaten TOON kullanıyordu; PaperAgent de aynı yola geldi → repository tutarlı. **Çıkış (decisions JSON) korundu** (parse güvenliği önceliği). **Ölçüm (cl100k_base BPE proxy, 3 ticker payload):** TOON 421 tok / JSON-min 462 tok / plaintext 425 tok → **JSON karşısında −%9 token, plaintext'le başa baş**. Sweet spot: yüksek-satırlı tablolar (`screen_stocks` 50+ row, `news_pipeline` 50 article) — gelecek sprint'e bırakıldı.
+
+### Operations
+
+- **`2026-05-03T03:50:00+03:00`:** **T212 demo orders scope canlı testi (CEO key güncellemesi sonrası).** `T212Client` ile sırasıyla: `GET /equity/orders` → **OK (count=0)**, `GET /equity/history/orders` → **OK (count=2; daha önceki external trade'ler)**, `POST /equity/orders/market AAPL_US_EQ qty=1 extendedHours=true` → **OK, id=48450755958, status=NEW** (hafta sonu pending; pazartesi pre-market'te FILLED). Bütün scope sorunları (`orders:read` / `orders:execute` / `history:orders`) **kapandı**. `T212MirrorPoller` `reconcile_external_orders=true` zaten aktif → pending pazartesi açılışında otomatik ayna trade olarak Supabase'e yazılır.
+
+### Changed
+
+- **`2026-05-03T03:50:00+03:00`:** **PaperAgent — Alpha Arena tarzı sistem promptu (CEO direktifi: alpha.ai benzeri kalıp).** `build_paper_system_prompt` 6 bölüme genişletildi: (0) Context Snapshot — Risk Regime + macro + news; (1) Raw Data Dashboard per-ticker; (2) Narrative vs Reality Check (PRICED-IN / DIVERGENCE / ABSORPTION / FRESH IMPULSE); (3) FOMO Map (Upside Chase / Downside Flush levels); (4) Alpha Setups — Hypothesis A/B + Steel Man Risk + Edge Depth/Risk Regime/Edge Freshness; (5) Edge Quality Matrix (HIGH-CONVICTION / TACTICAL SKEW / NO EDGE). Hard rules matematik bloğu eklendi: **risk per trade ≈ 1% NAV** (R = 0.01 × NAV; shares ≈ R / |entry−stop|), **stop ≤ 8%** (ATR-aware tercih), **Reward/Risk ≥ 2.0 zorunlu**, **20% NAV cap**, confidence < 0.60 → HOLD/SKIP. Karar JSON yeni opsiyonel alanlar: `steel_man_risk`, `risk_regime`, `edge_freshness`. Kaynaklar: Investopedia (Kelly + ATR), Wikipedia (Kelly fractional), Unger Academy (ATR systematic), PyQuantLab (sizing) — tümü 2026-05-03 doğrulandı.
+
+- **`2026-05-03T03:50:00+03:00`:** **PunishmentEngine — kademeli ceza/ödül merdiveni.** `check_and_punish` artık 8 kademede: WIN ≥ +5% (label `WIN`/`BIG_WIN`), 0–5% nötr, **−3% noise band (log only, ceza yok)**, −5..−3% CONFIDENCE_CUT 1d, −8..−5% CONFIDENCE_CUT 2d + LESSON, −10..−8% COOLDOWN 3d + LESSON, **≤ −10% COOLDOWN 7d + LESSON (blow-up circuit breaker)**, 3+ streak loss COOLDOWN 3d. Pozitif tarafta yeni: **3+ ardışık kazançta `SUCCESS_STREAK` memory** (RAG bias için pozitif örneklem). Yeni testler: `test_check_and_punish_noise_band_no_action`, `test_check_and_punish_blowup_triggers_seven_day_cooldown`, `test_check_and_punish_win_streak_records_success_streak` → **94/94 pytest yeşil**.
+
+- **`2026-05-03T03:50:00+03:00`:** **PaperAgent — `_apply_decision` matematik guard.** BUY adımı artık LLM kararı için 3 katı kontrol uyguluyor: (a) `stop_loss` ve `target` zorunlu (yoksa SKIP + WARN); (b) geometri sağlıklı mı (0 < stop < entry < target); (c) **stop mesafesi > 8% → SKIP**; (d) **Reward/Risk = (target−entry)/(entry−stop) < 2.0 → SKIP**. Sistem promptu kuralları söylüyor; executor matematik son sözü tutuyor. Canlı doğrulama: lokal Ollama cycle (MIDDAY) SPY için R/R=1.35'lik karar üretti → guard tam log/SKIP davranışı vermeye hazır (bu cycle `--no-trades` modundaydı).
+
+### Removed
+
+- **`2026-05-03T02:50:00+03:00`:** **Orphan / superseded scripts ve repo-root tek seferlik probe temizliği (CTO temizlik turu).**
+  - `scripts/truth_oauth.py` — **hard-coded `CLIENT_ID`/`CLIENT_SECRET`** içeriyordu (repo kuralı: secret asla kaynakta) + **`scripts/truth_oauth_token.py`** ile yeri belli (CHANGELOG / `ai-broker-todo.md` referanslı). **SİL.**
+  - `scripts/truth_get_token.py` — Playwright network interception ile ikinci yol; tek dokümante OAuth aracı `truth_oauth_token.py` kaldı. **SİL.**
+  - `scripts/test_truth_connection.py` — `from app.core.config import settings` (mevcut API `get_settings()` / `Settings`) → import-time **kırık**. **SİL.**
+  - `scripts/init_paper_db.py` — `sql/schemas/002_paper_trading.sql`’i tek başına çalıştırıyordu; **`scripts/apply_sql_schemas.py`** sıralı tüm şemaları uyguluyor (sql/README.md’de doc'lu). **SİL.**
+  - `test_db.py` (repo root) — `trade_memories` AMD probe; tek seferlik debug artığı, hiçbir yerden referansı yok. **SİL.**
+  - Etki: 5 dosya, ~14 KB; **0** kullanım kırılması. 91/91 unit test yeşil; uvicorn boot temiz (`Bot handlers registered: 9 commands + free-text chat`, `Telegram bot menu commands installed (9 entries)`).
+
+### Changed
+
+- **`2026-05-03T02:50:00+03:00`:** **Embedder shared HTTP client + logger normalize.** `app/memory/embedder.py` artık `app.core.logging.get_logger("embedder")` kullanıyor (önce `logging.getLogger(__name__)` — diğer servislerle stil farklıydı). `app/main.py` lifespan’ı `OllamaEmbedder(http_client=http_client)` enjekte ediyor; embedder artık kendi `httpx.AsyncClient`’ını yaratmaz, **lifespan’ın paylaşımlı client**’ını kullanır → bağlantı havuzu konsolide, `close()` lifespan tarafından yönetiliyor.
+
+- **`2026-05-03T02:50:00+03:00`:** **Docker üretim sertleştirmesi (CTO temizlik turu).**
+  - `Dockerfile` builder’da **iki aşamalı `uv sync`**: önce `pyproject.toml` + `uv.lock` ile `--no-install-project` (deps katmanı), sonra `app/` kopyala + tam sync → **app değişiklikleri dependency layer’ı invalidate etmiyor** (rebuild süresi ciddi düşer).
+  - `docker-compose.yml`: **`ai-broker` healthcheck** (`/health` 30s), **`ollama` healthcheck** (`/api/tags` 30s), `depends_on: condition: service_healthy` → uygulama Ollama hazır olmadan kalkıp ilk istekte race vermiyor. Her iki servis için **log rotation** (`json-file`, `max-size: 20m`, `max-file: 5`).
+  - `.dockerignore`: `experiments/`, `terminals/`, `.agents/` ek olarak hariç tutuluyor (build context küçülüyor; dev dosyaları imaja sızmıyor).
+
+### Added
+
+- **`2026-05-03T02:50:00+03:00`:** **Sunucu seçim raporu (`docs/FAZ4_DEPLOY.md` § Sunucu seçimi).** CEO kuralı “cloud LLM token derdi yok, lokal Ollama 7/24” için **6 senaryo** + trade-off tablosu (Hetzner GEX44 RTX 4000 Ada / Scaleway M4 Pro / Hetzner AX42 / OCI Free / kendi M4 Pro Max + Cloudflare Tunnel / RunPod spot). Birinci tercih: **Hetzner GEX44** (~€189/ay, 20 GB VRAM, 30–60 tok/s deepseek-r1:14b). Geçiş kontrol listesi (Docker + nvidia-container-toolkit + cloudflared + systemd + log rotation + uptime).
+
+- **`2026-05-03T02:00:00+03:00`:** **Telegram menü + sohbet modu (CEO UX).**
+  - **Menü:** `app/bot/app.py` içinde `BOT_MENU_COMMANDS` (9 entry: portfolio/paper/analyze/news/memory/runpaper/punishments/usage/start) + `install_bot_menu` lifespan’da `set_my_commands` ile push ediyor. Telegram istemcide sol-altta menü düğmesi ve `/` dropdown otomatik dolu.
+  - **Sohbet:** Yeni `chat_handler` (`MessageHandler(filters.TEXT & ~filters.COMMAND)`) — komutla başlamayan her metin canlı broker bağlamıyla (T212 cash + pozisyonlar + son PaperAgent cycle özeti) Ollama’ya gidiyor; cevap Türkçe, max ~6 cümle, **trade execute etmez** (system prompt’ta sertçe yazılı). deepseek-r1 `<think>...</think>` blokları `_strip_thinking` ile kullanıcıya gösterilmeden temizleniyor.
+  - **Doğrulama:** lifespan log’u → `Bot handlers registered: 9 commands + free-text chat` + `Telegram bot menu commands installed (9 entries)`. 91/91 unit test yeşil.
+
+### Operations
+
+- **`2026-05-03T02:00:00+03:00`:** **T212 demo BUY canlı testi (CEO doğrulaması).** `T212Client.place_market_order("AAPL_US_EQ", 1, extended_hours=True)` → **HTTP 403 (boş body)**. Hesapta `availableToTrade = 20.000.00 EUR`; quantity / fund problemi değil — **`orders:execute` scope** demo API key’inde kapalı. Bot kodu hatasız; T212 yetkilendirme katmanı reddediyor. CEO eylemi: T212 panel → API key yenile (`account / portfolio / orders:read / orders:execute / history:orders`).
+
+- **`2026-05-03T01:30:00+03:00`:** **Geliştirme = Üretim aynı stack — Ollama-only mod (Apple Silicon Metal).** CEO talebi: bu makinede Groq token tüketme, **lokal LLM ana yol** olsun. Yeni `Settings.prefer_local_llm: bool` (`.env` `PREFER_LOCAL_LLM=true`); default davranış değişmedi (kapalı).
+  - `PaperAgent.run_cycle` `prefer_local_llm=True` iken **`_run_cycle_local_prepass`** dallanmasına geçiyor: `screen_stocks` + tutulan pozisyonlar evrenini hazırlıyor, her ticker için `get_technical` + `get_news` + `get_memories`'i Python tarafında **eş zamanlı** çekiyor, hepsini "TOOL OUTPUTS" prompt bölümüne sıkıştırıp **tek seferlik Ollama** çağırısı yapıyor — deepseek-r1'in zayıf tool-calling'ini bypass eder, **veri her zaman gerçek**.
+  - `news_pipeline.analyze_news_batch(prefer_local=True)` → Groq adımı atlanır, tek atış Ollama. `analysis_runner.run_symbol_analysis` ve `tools/executor.get_news` tek satır değişiklikle bayrağı iletti.
+  - Doğrulama: `POST /internal/analyze?symbol=AAPL&include_news=true` → **analysis LLM = deepseek-r1:14b**, **news batch = deepseek-r1:14b** (Groq sıfır byte). Karar: BUY conf 0.7, stop $250, target $300; veri AAPL $280.14 / RSI 66.4 / SMA20 $266.36 (yfinance + Finnhub gerçek). 91/91 unit test yeşil.
+  - `Settings.paper_local_prepass_top_k: int = 5` (LLM prompt boyutu için screener evren cap'i).
+
+- **`2026-05-03T01:00:00+03:00`:** **Canlı uçtan uca smoke (mock yok, hepsi gerçek veri).** DB hard-reset (paper_*, trade_memories, punishment_log, daily_reports temizlendi; `trump_posts` korundu); T212 demo `cash.availableToTrade=20.000.00 EUR` ile gölge defter resync. Servis ping’leri yeşil: T212 demo (EUR 20k), yfinance NVDA $198.45 RSI 52.3, Finnhub 10 article, FMP screener (NVDA/GOOGL/AAPL/MSFT/AMZN), **Groq llama-3.3-70b 0.4s**, **Ollama deepseek-r1:14b 26s**. `PaperAgent.run_cycle` (gerçek tools + LLM + RAG): `daily_reports` PAPER_CYCLE log (1.3 KB), `trade_memories` DECISION (NVDA, AAPL). **Bulgular:** (a) Groq daily token limit doldu (99403/100000) → otomatik **Ollama fallback** devreye girdi. (b) **T212 `POST /equity/orders/market` → 403** (`orders:execute` scope yok) — bot karar verir, RAG yazar, ama emir T212’ye iletilmez. **CEO eylemi:** T212 demo panelinden API key’i `account / portfolio / orders:read / orders:execute / history:orders` scope’larıyla yenile. Yeni operasyon scripti: `scripts/live_paper_cycle.py` (tüm gerçek bağımlılıklar, isteğe bağlı `--no-trades`).
+
+- **`2026-05-02T23:50:00+03:00`:** **CEO ortam yapılandırması (T212 demo paper canlı çalışma):** `.env` güncellendi — **`PAPER_EXECUTION_BACKEND=t212`**, `PAPER_T212_EXTENDED_HOURS=true`, `PAPER_T212_MIRROR_POLLER_ENABLED=true`, `PAPER_T212_PENDING_POLL_SEC=90`, `PAPER_T212_RECONCILE_EXTERNAL_ORDERS=true`, `PAPER_T212_SYNC_SUPABASE_LEDGER=true`, `PAPER_ACCOUNT_CURRENCY=EUR`, `PAPER_STARTING_NAV_USD=20000` (T212 demo birincil para birimi EUR). Supabase’te eski sanal modda kalan **`paper_trades` (5 satır, `execution_broker=supabase`)** ve **`paper_portfolio` (3 satır)** silindi; `paper_account.balance` T212 `cash.availableToTrade=18000.00 EUR` ile sync edildi. Lifespan smoke: T212 client + Groq + Ollama + shadow ledger + Telegram polling + TrumpMonitor + PaperAgent + MirrorPoller hazır; MarketClock pazartesi premarket’i bekliyor.
+
+### Changed
+
+- **`2026-05-03T01:00:00+03:00`:** **PaperAgent risk capping (T212 modu dahil):** `_apply_decision` BUY adımı artık T212 modunda da broker tarafında **`~%20 NAV cap`** uyguluyor. T212 `get_account_summary().totalValue` NAV proxy’si, account currency vs USD farkı 1:1 yaklaşık (her zaman LLM disiplininden daha sıkı; T212 yetersiz fonu zaten reddeder). Aşırı boyutlu BUY (örn. LLM “100 NVDA ≈ €18.300”) `WARNING` log + clipped quantity. Birim testler bu disiplini etkilemez (`paper_executes_on_t212=False` Supabase yolu). 91/91 yeşil.
+
+- **`2026-05-02T23:55:00+03:00`:** **T212MirrorPoller dayanıklılık:** **403 Forbidden** durumunda `paper_t212_reconcile_external_orders` (uygulama/web pending tarama) ve `history/orders` (fill recovery) **runtime’da bir kez uyarı verip otomatik kapatılıyor** — log gürültüsü önleniyor. Açıklama: T212 demo API key’inde `orders:read` / `history:orders` scope’u yoksa bu özellikler doğal olarak çalışmaz; bot kendi koyduğu emirler için `GET /equity/orders/{id}` ile takip eder.
+
+### Added
+
+- **`2026-05-01T23:35:00+03:00`:** **T212 → Supabase gölge defter:** `PaperBroker.sync_supabase_ledger_from_t212` / `sync_ledger_from_t212_client` — `paper_account.balance` = T212 `cash.availableToTrade`; `paper_portfolio` açık pozisyonlar = T212 `get_positions` (yfinance ticker, avg, adet, `current_value`). **`PAPER_T212_SYNC_SUPABASE_LEDGER`** (varsayılan `true`). Tetikleyiciler: **uygulama açılışı** (`main.py`), **`T212MirrorPoller` tick sonu**, **`PAPER_T212_MIRROR_POLLER_ENABLED=false`** iken ayrı **`shadow_ledger` döngüsü** (`PAPER_T212_PENDING_POLL_SEC`), anında fill sonrası **BUY/SELL** ayna (`PaperAgent`); **`/paper reset confirm`** sonrası T212’den yeniden doldurma. **`.env.example`**, **`AI_BROKER_PROJECT.md`**, `inspect_paper_supabase` açıklaması.
+
+### Changed
+
+- **`2026-05-01T23:00:00+03:00`:** **`scripts/inspect_paper_supabase.py`:** `PAPER_EXECUTION_BACKEND=t212` iken `paper_account` / `paper_portfolio` ile T212 demo’nun **bilerek uyuşmayabileceğini** açıklayan uyarı (T212 gerçek portföyü API’de; DB’de ayna `paper_trades`).
+
+### Added
+
+- **`2026-05-01T22:20:00+03:00`:** **T212 pending → ayna tamamlama (tam akış):** `sql/schemas/005_t212_pending_mirror.sql` — bekleyen `t212_order_id` kuyruğu. **`T212Client`:** `get_pending_order` (404 geçişli), `get_all_pending_orders`, `get_history_orders` (sayfalama). **`t212_mirror_sync`** / **`t212_pending_mirror_store`** / **`T212MirrorPoller`** — tick’te reconcile (`GET /equity/orders`), kuyruk satırları için `GET /equity/orders/{id}`; yanıt **FILLED** (veya iptal öncesi kısmi fill) → `record_mirror_trade`; pending **404** → `history/orders` + ticker ile arama (rate limit: sayfa arası bekleme). **`main.py`** arka plan görevi; env: **`PAPER_T212_MIRROR_POLLER_ENABLED`**, **`PAPER_T212_PENDING_POLL_SEC`**, **`PAPER_T212_RECONCILE_EXTERNAL_ORDERS`**. **`PaperBroker.t212_mirror_trade_exists`**. **`scripts/apply_sql_schemas.py`** + **`sql/README.md`** sıra güncellendi. **Testler:** `test_t212_mirror_sync.py`, `test_paper_agent_t212_mirror` güncel.
+
+### Changed
+
+- **`2026-05-01T21:05:00+03:00`:** **T212 ayna = yalnızca gerçekleşen fill:** `place_market_order` cevabında **`filledQuantity` / `filledValue` sıfırsa** (uygulamadaki **Pending** / piyasa açılınca çalışır) **`record_mirror_trade` çağrılmaz** — önceki sürümde `id` varken tahmini fiyatla ayna yazılıyordu; kaldırıldı. **`tests/unit/test_paper_agent_t212_mirror.py`**.
+
+- **`2026-05-01T20:15:00+03:00`:** **Paper / T212 altın kural:** `paper_executes_on_t212=True` iken **`PaperBroker.buy` / `sell`** (Supabase nakit+pozisyon defteri) **yasak** — yalnızca T212 emri sonrası **`record_mirror_trade`** ve **`t212_order_id` zorunlu** (`execution_broker=t212`). T212 API yanıtında **`id` yoksa** ayna satırı **yazılmaz** (hafta sonu / kapalı seans / şema farkı); log uyarısı. `main.py`, `smoke_runpaper_local`, `faz3_e2e_check` broker kurulumu ayarı ile uyumlu. **`tests/unit/test_paper_broker.py`** yeni doğrulamalar.
+
+- **`2026-05-02T14:30:00+03:00`:** **T212 BUY boyutu:** Yerel **yfinance FX** ile kur tahmini ve buna bağlı %20 NAV kırpma **kaldırıldı** — T212 uygulaması emir öncesinde **EUR toplam, USD/EUR kur, FX ücreti** gösteriyor; kırpma yalnızca **Supabase** sanal defter yolunda (fiyat × adet ile). `usd_notional_to_account_currency` silindi.
+
+- **`2026-05-02T12:00:00+03:00`:** **T212 / paper hesap para birimi (EUR practice):** `PAPER_EXECUTION_BACKEND=t212` iken para birimi **T212 `account/summary.currency`** üzerinden (ör. **EUR**). **`PAPER_ACCOUNT_CURRENCY`** — Supabase sanal defter için (varsayılan USD). **`paper_starting_nav_usd`** sayısal olarak **hesap para birimindeki** başlangıç NAV (env adı geriye dönük). PaperAgent: dinamik **system prompt**, risk özeti ve Telegram feed **$** yerine ISO kodu; **BUY** boyutlandırma: ABD hissesi **USD** fiyatı → yaklaşık **EUR/GBP** karşılığı (`EURUSD=X` / `GBPUSD=X` yfinance) ile ~%20 NAV tavanı. **`app/services/paper/account_currency.py`**. Telegram **`/portfolio`**, **`/paper`**, **`/paper stats|history|reset`**, **`ToolExecutor`**, **`analysis_runner`** T212 satırları güncellendi. **`.env.example`:** `PAPER_ACCOUNT_CURRENCY`.
+
+### Notes — ürün hedefi (CEO)
+
+- **`2026-05-02T23:45:00+03:00`:** **Paper trading hedefi:** işlemlerin **Trading 212 demo (Public API)** üzerinden yürütülmesi; verilen T212 key’ler bu amaçla. **Mevcut kod:** Paper Agent yürütmesi **`PaperBroker` + Supabase** (`paper_*` tabloları); **`T212Client` yalnızca pozisyon okur**, emir uçları henüz yok. Sonraki iş: `POST /api/v0/equity/orders/market` (ve gerekirse limit) + ticker eşlemesi + isteğe bağlı Supabase ayna/denetim. Kaynak: [Trading 212 — Place market order](https://docs.trading212.com/api/orders/placemarketorder).
+- **`2026-05-01T22:45:00+03:00`:** **Güncelleme (üstteki CEO notuna):** **`PAPER_EXECUTION_BACKEND=t212`** + **`sql/schemas/004_t212_paper_execution.sql`** + `T212Client` market emri ile Paper Agent yürütmesi T212 üzerinden yapılabilir; Supabase **`paper_trades`** ayna/istatistik için kalır. Varsayılan **`supabase`** eski sanal defteri korur. Telegram **`/paper`** ve **`/paper stats`** `t212` modunda hesap/pozisyon özetini API’den gösterir.
+
+### Added
+
+- **`2026-05-01T23:40:00+03:00`:** **`scripts/apply_sql_schemas.py`** — `SUPABASE_DB_URL` ile `sql/schemas/*.sql` dosyalarını sırayla uygular (dollar-quote + tek tırnak + `--` yorumlarında güvenli ayırma). **`--no-paper-drop`** → `002` içindeki `DROP TABLE` atlanır; **`002_paper_trading.sql`** tablolar `CREATE TABLE IF NOT EXISTS`. **`001_memory.sql`** HNSW indeksi `IF NOT EXISTS` + sabit ad. **`004_t212_paper_execution.sql`** COMMENT metninde ayırıcı `;` kaldırıldı (parser uyumu). **`sql/README.md`** komut satırı bölümü.
+
+### Changed
+
+- **`2026-05-01T23:15:00+03:00`:** **DB şema + ERD:** `trump_posts` tanımı yalnızca **`sql/schemas/trump_posts.sql`** (`post_id` PK); **`sql/schemas/001_memory.sql`** içindeki yinelenen blok kaldırıldı (kurulum: 001 → `trump_posts.sql` → 002…). **`sql/schema.dbml`** — [dbdiagram.io](https://dbdiagram.io) için birleşik model; **`sql/README.md`** — uygulama sırası ve görselleştirme. **`002_paper_trading.sql`** — üst not: DROP ile veri sıfırlanır. **`.vscode/extensions.json`** — DBML önerisi (`matt-meyers.vscode-dbml`). **`ai-broker-todo.md`** sql ağacı.
+
+- **`2026-05-01T22:45:00+03:00`:** **Telegram Paper + T212:** `Settings.paper_executes_on_t212` iken **`/paper`** ve **`/paper stats`** metinleri **T212** `get_account_summary` + `get_positions` ile üretilir (para birimi / toplam değer / pozisyon satırları); kapanmış işlem istatistikleri Supabase **`paper_trades`** üzerinden devam eder. **`.env.example`:** `PAPER_EXECUTION_BACKEND`, `PAPER_T212_EXTENDED_HOURS`. **`AI_BROKER_PROJECT.md`** Faz 3 CEO özeti + checklist T212 yürütme ile uyumlu. **`ai-broker-todo.md`** Faz 3a maddeleri güncellendi.
+
+### Added
+
+- **`2026-05-02T23:00:00+03:00`:** **`scripts/inspect_paper_supabase.py`** — terminalden `paper_account` / `paper_portfolio` / `paper_trades` özetini yazdırır (DSN maskeli). **`README.md`** smoke bölümüne tek satır.
+
+- **`2026-05-02T14:30:00+03:00`:** **`scripts/smoke_runpaper_local.py`** — Telegram olmadan tek `PaperAgent.run_cycle("MANUAL", …)`; `main.py` ile aynı RAG/ceza/position-monitor kablosu. **`--dry-run`** → `allow_trades=False`. **`README.md`** smoke bölümü.
+
+### Fixed — Security & correctness (CTO review, 2026-05-02)
+
+- **`2026-05-02T12:00:00+03:00`:** **TrumpMonitor RAG:** `memory_type` artık LLM `sentiment` için **`bearish` → WARNING** (eskiden yanlışlıkla `negative` aranıyordu). **`_save_to_db`:** `affected_sectors` / `affected_tickers` üst sınır (32 / 64). **Telegram:** `TELEGRAM_ALLOWED_USER_IDS` boşsa tüm komutlar reddedilir; webhook modunda `TELEGRAM_WEBHOOK_SECRET` boşsa `POST /telegram/webhook` → **HTTP 500** (lifespan’da `critical` log). **`/internal/*`:** isteğe bağlı **`INTERNAL_API_KEY`** + `X-Internal-Api-Key`; tarayıcı **`POST /ui/analyze`** (`WEB_UI_ENABLED`). **Paper:** `PaperTrade` / `PaperPosition` `extra="ignore"`, `model_validate` satır okuma; **PaperAgent** NAV MTM fiyatları **`asyncio.gather`**. **MarketClock:** seans kapalısı beklemede **`max(60, sleep_s)`** (takvim edge-case’te kısa döngü riski). **Testler:** `test_internal_api.py`, `test_web_ui` (`/ui/analyze`), Telegram handler allow-list güncellemesi. **Doküman:** `README.md`, `.env.example`, `docs/FAZ5_PLAN.md`.
+
+### Added — Faz 5 (web UI + open-source prep)
+
+- **`2026-05-01T18:00:00+03:00`:** **Faz 5 ilk dilim:** `WEB_UI_ENABLED` (`Settings.web_ui_enabled`) — `GET /ui` statik sayfa (`app/web/static/index.html`) `POST /internal/analyze` çağırır (`include_news`, `extended`, `use_toon`). **`GET /health`** → `phase` **`5`**, `web_ui.enabled`. **`app/main.py`** sürüm **1.4.0**, `web_router` dahil. **Dosyalar:** `LICENSE` (MIT), `CONTRIBUTING.md`, [`docs/FAZ5_PLAN.md`](docs/FAZ5_PLAN.md). **`.env.example`**, **`README.md`**, **`AI_BROKER_PROJECT.md`** (Project status + Faz 5 checklist), **`ai-broker-todo.md`**, **`pyproject.toml` 1.4.0**. **Testler:** `tests/unit/test_web_ui.py`, `test_health_web_ui_flag`.
+
+### Added — Faz 4 (deployment)
+
+- **`2026-05-02T22:30:00+03:00`:** **Docker / Compose:** `Dockerfile` (multi-stage, `uv sync --frozen --no-dev`, kullanıcı `appuser`), `.dockerignore`, `docker-compose.yml` (`ai-broker` + `ollama`, `OLLAMA_BASE_URL` override). **Doküman:** `docs/FAZ4_DEPLOY.md` (Tunnel, OCI ARM, token notları, 7/24 checklist). **README** Docker bölümü. **`AI_BROKER_PROJECT.md`** Faz 4 maddeleri güncellendi. *CI ortamında `docker` yoksa imaj yerelde `docker build` ile doğrulanır.*
+
+### Fixed
+
+- **`2026-05-02T21:05:00+03:00`:** **FMP screener** — Basic plan genelde legacy `api/v3/stock-screener` için **403** döndürüyor; birincil uç nokta **`/stable/company-screener`** (US, `isEtf=false`, `limit=100`), başarısızsa **v3 yedek**. Hata loglarında `apikey` maskeleme (`_redact_secrets`).
+
+### Added
+
+- **`2026-05-02T20:15:00+03:00`:** **Faz 3 E2E doğrulama:** `scripts/faz3_e2e_check.py` — Ollama modelleri, Truth/Supabase/paper yolları, isteğe bağlı tek PaperAgent döngüsü (işlem yok). **Entegrasyon:** `tests/integration/test_faz3_e2e_checklist.py` — Trump `run_emergency_cycle` mock pipeline + `set_paper_agent` kancası. `ai-broker-todo.md` Faz 3 E2E maddeleri güncellendi (FMP anahtarı CEO `.env` ile tamamlanacak).
+
+### Changed — Faz 3 (drawdown, screener, prompts)
+
+- **`2026-05-02T17:30:00+03:00`:** **PaperAgent** — zirve NAV’a göre drawdown takibi; `PAPER_MAX_DRAWDOWN_PCT` (varsayılan 30) aşımında yeni **BUY** yok; döngü prompt’una risk özeti + `get_macro_context` özeti; Alpha tarzı **SYSTEM_PROMPT** (edge_depth, hipotezler, narrative_vs_reality, invalidation zorunluluğu); invalidation **SELL** sonrası ayrı Telegram mesajı (`🔴 TICKER İNVALİDASYON`); canlı feed’de NAV satırı + makro özeti. **`ToolExecutor`** — `get_technical` için TTL önbellek (`PAPER_TECHNICAL_CACHE_TTL_SEC`). **`SPScreener`** — istek `limit=250`, ETF/`isEtf` atlama. **`PaperBroker.reset_all`** + Telegram **`/paper reset confirm`** (nakit `PAPER_STARTING_NAV_USD`); `PaperAgent.reset_risk_state()`. **Testler:** `test_screener.py`, `test_paper_broker_reset_all`.
+
+### Changed — Faz 3 (Paper agent polish)
+
+- **`2026-05-01T22:10:00+03:00`:** **PaperAgent** — ET günü başında `_emergency_count` sıfırlanır; `run_emergency_cycle` tamamı `asyncio.Lock` altında; acil prompt’ta `affected_tickers` önceliği + **ACTIVE PUNISHMENTS** bloğu; normal `run_cycle` kullanıcı mesajına ceza listesi eklendi; acil Telegram feed’inde kısa özet (etki, snippet, görsel analizi). **`/paper stats`** — tahmini NAV, başlangıç $20k’ya göre getiri %, kapalı işlemlerden basit Sharpe-benzeri (pnl% mean/σ). **Birim testler:** `tests/unit/test_punishment.py`, `tests/unit/test_position_monitor.py`. **Groq tool loop:** asistan mesajı OpenAI uyumlu `tool_calls` serileştirmesi (`app/services/llm/tool_calling.py`). **PunishmentEngine** — üç ardışık zararlı SELL sonrası COOLDOWN (+ mevcut eşik kuralları).
+
+### Added — Faz 3 (Paper broker — PR #1 altyapı)
+
+- **`2026-05-01T12:45:00+03:00`:** **Paper trading şeması** `sql/schemas/002_paper_trading.sql`: `paper_account` (tek satır `id = 1`), `paper_portfolio`, genişletilmiş `paper_trades` (makro/sentiment, `pnl_percent`, `realized_pnl_usd`). **`app/services/paper/`:** Pydantic modeller + `PaperBroker` (bakiye kontrolü, ortalama maliyet, short yok, SAT’ta USD realized). **Telegram:** `/paper` — bakiye, pozisyonlar, yfinance ile unrealized PnL (`N/A` fallback). **Test:** `tests/unit/test_paper_broker.py`.
+- **`2026-05-01T12:45:00+03:00`:** **`sql/schemas/001_memory.sql`** artık `paper_trades` oluşturmaz; paper tabloları yalnızca `002_paper_trading.sql` ile tanımlanır (kurulum sırası: önce `001`, sonra `002`).
+- **`2026-05-01T12:35:00+01:00`:** **Faz 3b–3j iskeleti:** `app/tools/definitions.py`, `app/tools/executor.py` (Finnhub/news_pipeline, technical, RAG, paper broker, VIX). **Market clock:** `app/services/market_clock.py` (`exchange-calendars`) premarket 5m + seans düşük frekans tick. **Screener:** `app/services/screener.py` (FMP; env `FMP_API_KEY`). **LLM tool loop:** `app/services/llm/tool_calling.py` (Groq tool-calling + Ollama fallback). **Agent:** `app/agents/paper_agent.py` (event loop; env `PAPER_AGENT_ENABLED`). **Telegram:** `/runpaper`, `/punishments`, `/paper history|stats|log`. **Schema:** `sql/schemas/003_paper_agent.sql` (paper_trades risk/cycle alanları).
+
+### Fixed
+
+- **`2026-05-01T12:45:00+03:00`:** **`app/memory/database.py`** — `pgvector.asyncpg.register_vector` yalnızca pool `init_connection` içinde import edilir; modül importunda pgvector’un takılması (pytest koleksiyonu / CLI gecikmesi) önlenir.
+
+### Added — Faz 2 (RAG & Supabase Kalıcı Hafıza)
+
+- **`2026-04-29T22:30:00+03:00`:** **Supabase/pgvector Entegrasyonu** tamamlandı. `asyncpg` bağlantı havuzu ve vector eklentisi yapılandırıldı.
+- **Şemalar:** `sql/schemas/001_memory.sql` (trade_memories, daily_reports, trump_posts, paper_trades, punishment_log) oluşturuldu, HNSW indeksi ve `match_trade_memories` (Cosine Similarity) eklendi.
+- **Embedder:** `app/memory/embedder.py` (`OllamaEmbedder`) yerel `nomic-embed-text` modeli ile 768 boyutlu vektör hesaplaması için yazıldı.
+- **Retriever:** `app/memory/retriever.py` (`RAGRetriever`) ile hafıza ekleme ve cosine arama eklendi.
+- **Entegrasyon:** `TrumpMonitor` ve `analysis_runner` artık geçmiş anıları RAG olarak kullanıyor ve LLM kararlarını kaydediyor.
+- **Telegram:** `/memory SYMBOL` komutu eklendi.
+- **Testler:** `test_embedder.py` ve `test_retriever.py` birim testleri oluşturuldu.
+
+### Fixed
+
+- **`2026-04-30T16:57:00+01:00`:** Telegram `/memory SYMBOL` artık embedding-benzerliği ile rastgele boş dönmek yerine `trade_memories` tablosundan **en güncel kayıtları** deterministik olarak listeler (vector arama yalnızca `/analyze` içindeki RAG için kalır).
+- **`2026-04-30T18:10:00+01:00`:** **Düzeltme:** `app/main.py` lifespan içinde `register_handlers(..., retriever=...)` çağrısı, `RAGRetriever` oluşturulmadan önce `app.state.retriever` (henüz yok) ile yapılıyordu → Telegram `bot_data` içinde `retriever` hep `None` kaldı; `/analyze` sonrası `trade_memories` insert ve `/memory` bu yüzden çalışmıyordu. Retriever artık handler kaydından **önce** oluşturulup aynı instance handler’a veriliyor.
+- **`2026-04-30T19:05:00+01:00`:** **Test:** `tests/unit/test_telegram_bot.py` — PTB `register_handlers` retriever enjeksiyonu, `/memory` handler (`list_recent_memories`, boş retriever, boş sonuç) ve `/start` metninde `/memory` satırı için birim testleri. **Telegram:** `/start` yardım metnine `/memory SYMBOL` eklendi.
+- **`2026-04-30T20:15:00+01:00`:** **Tanılama / bağlantı:** `GET /health` artık gizli anahtar olmadan `telegram` (token var mı, webhook mu polling mi, handler hazır mı) ve `memory_db` (`SUPABASE_DB_URL` tanımlı mı, asyncpg pool açıldı mı) özetini döner. **DB:** `SupabaseDatabase.connect(dsn=...)` ile pool, `get_settings().supabase_db_url` üzerinden açılır (`.env` tek kaynak). **Embedding:** `OllamaEmbedder` artık `OLLAMA_BASE_URL` ile uyumlu (`ollama_base_url`). **`.env.example`:** REST key’lerin `trade_memories` için yeterli olmadığı notu. **Test:** `tests/unit/test_health.py`.
+- **`2026-04-30T21:00:00+01:00`:** **`pyproject.toml`:** `asyncpg` ve `pgvector` üretim bağımlılıkları olarak eklendi (önceden yalnızca ortamda dolaylı kurulum vardı; temiz `uv sync` ile Faz 2 DB katmanı eksik kalıyordu). `uv.lock` güncellendi. **`AI_BROKER_PROJECT.md`:** Faz 2 checklist, kodla uyumlu olacak şekilde güncellendi (tamamlanan RAG/pgvector maddeleri + bilinçli olarak açık kalan: `daily_reports` uygulaması, opportunity cost, haber batch kalıcılığı).
+- **`2026-04-30T23:25:00+01:00`:** **Supabase pool:** Bağlantı hatalarında tam traceback + anlamlı `last_connect_error` metni; `create_pool(..., timeout=25)` ile uzun sessiz bekleme azaltıldı; `*.supabase.com` DSN’lerinde `sslmode=require` yoksa otomatik eklenir. **`GET /health`** → `memory_db.last_connect_error`. **`.env.example`:** Supabase TLS notu.
+- **`2026-04-30T23:45:00+01:00`:** **`scripts/check_supabase_faz2.py`** — terminalden `SUPABASE_DB_URL` ile bağlantı, `vector` eklentisi, `trade_memories` kolonları ve `match_trade_memories` varlığı doğrulaması (kimlik bilgisi yazdırmaz). Çalıştırma: `PYTHONPATH=. uv run python scripts/check_supabase_faz2.py`.
+
+### Added — Faz 1.5-d (Trump / Truth Social monitor)
+
+- **`2026-04-29T12:15:00+03:00`:** **`app/services/trump_monitor.py`** — `TrumpMonitor`: Mastodon uyumlu **SSE** (varsayılan) veya **`websocket`** transport (`TRUTH_SOCIAL_STREAM_TRANSPORT`), `connect()` ile hesap id çözümü; `_analyze_impact()` / görsel için **`GroqService.analyze_multimodal`**; `_save_to_db()` şimdilik **structured log**; **`sql/schemas/trump_posts.sql`** Faz 2 için tablo; **lifespan** arka plan `asyncio.create_task` + iptal.
+- **Bağımlılık:** `websockets` (WS kullanımı için) ve `curl_cffi` eklendi.
+- **Konfig:** `TRUTH_SOCIAL_*`, `TRUMP_IMPACT_THRESHOLD`, `GROQ_VISION_MODEL`, `.env.example` güncellendi.
+- **`curl-cffi`:** Truth Social REST/SSE ve **Websocket** çağrılarında Cloudflare/WAF bypass için **`impersonate="chrome"`** kullanıldı. Canlı doğrulama tamamlandı (HTTP 404 ve 403 engelleri aşıldı).
+- **OAuth yardımcı:** `scripts/truth_oauth_token.py` — `--validate-only` doğrulaması da `curl_cffi` ile.
+- **`GET /health`:** `phase` **`1.5-d`**, sürüm **1.3.0**.
+
+### Removed — TrendRadar (kapsam dışı)
+
+- **`2026-04-27T16:30:00+03:00` — Karar:** [sansan0/TrendRadar](https://github.com/sansan0/TrendRadar) upstream entegrasyonu projeden çıkarıldı (finans odaklı haber hattı Finnhub + `POST /internal/news/batch` ile yeterli; klon bakımı ve Çin sıcak-liste ağırlığı ROI düşük).
+- **`external/TrendRadar/`** yerel klon dizini silindi (varsa).
+- **`.gitignore`:** `external/TrendRadar/` satırı kaldırıldı.
+- **Doküman:** `AI_BROKER_PROJECT.md` §3 harici araçlar (TrendRadar satırı ve checklist maddesi), `docs/FAZ15_PLAN.md` (1.5-c iptal notu), `external/README.md` (iki upstream: PokieTicker + toon), `pyproject.toml` yorum.
+- **Geçerli yön:** Sıradaki büyük iş **Faz 2** Supabase/pgvector + RAG; ek haber kaynağı için `POST /internal/news/batch` kullanımı devam eder.
+- **Not:** Aşağıdaki eski `### Project status` maddesindeki **Next:** (TrendRadar → …) geçerliliğini yitirdi; güncel sıra bu bloktaki **Geçerli yön** ile uyumludur.
+
+### Added — Faz 1.5-b (birleşik analiz + TOON)
+
+- **`app/services/analysis_runner.py`** — tek giriş noktası: MVP teknik + isteğe bağlı extended + isteğe bağlı Finnhub→news batch → **tek** final Groq/Ollama çağrısı; `USE_TOON_PROMPTS` / `toon-format` ile TOON paketleme.
+- **`Settings.use_toon_prompts`** (env `USE_TOON_PROMPTS`) — [.env.example](.env.example) güncellendi.
+- **Telegram:** `/analyze SYMBOL`, `/analyze SYMBOL news`, `/analyze SYMBOL news full` (kelime `news` / `full` | `extended`).
+- **API:** `POST /internal/analyze` query parametreleri `include_news`, `extended`, `use_toon`.
+- **Test:** `tests/unit/test_analysis_runner.py`.
+- **Sürüm:** **1.2.0**; dokümanlar: [docs/FAZ15_PLAN.md](docs/FAZ15_PLAN.md), [AI_BROKER_PROJECT.md](AI_BROKER_PROJECT.md) Faz 1.5 maddeleri, [README.md](README.md).
+
+### Added — Faz 1.5 (haber batch + genişletilmiş teknik)
+
+- **[docs/FAZ15_PLAN.md](docs/FAZ15_PLAN.md)** — faz sırası, API özeti, riskler.
+- **`app/services/news_pipeline.py`** — PokieTicker Layer 1 uyumlu toplu haber prompt’u + JSON parse + Groq/Ollama.
+- **`app/services/finnhub_news.py`** — `company-news` async çekimi.
+- **`app/tools/technical_extended.py`** — PokieTicker tarzı fiyat-only feature satırı (`ret_*`, `rsi_14`, `volatility_*`, …).
+- **API:** `GET /internal/technical/extended`, `POST /internal/news/batch`, `GET /internal/news/analyze`; **`/health`** → `phase` **1.5**, sürüm `importlib.metadata`.
+- **Telegram:** `/news SYMBOL` (Finnhub + batch); `register_handlers` → `settings` + `http_client` `bot_data` içinde.
+- **Testler:** `tests/unit/test_news_pipeline.py`, `tests/unit/test_technical_extended.py`.
+- **`README.md`:** Faz 1.5 endpoint ve `/news` tabloları; `FINNHUB_API_KEY` satırı.
+- **`pyproject.toml` / `app/main.py`:** sürüm **1.1.0**.
+- **`AI_BROKER_PROJECT.md`:** Faz 1 maddeleri tamamlandı işareti; **Faz 1.5** checklist.
+
+### Changed — Docs & rules (Faz 1 sync)
+
+- **`pyproject.toml`:** optional **`[integrations]`** extra — `toon-format` (TOON; LLM prompt sıkıştırma). Kurulum: `uv pip install -e ".[dev,integrations]"`.
+- **`AI_BROKER_PROJECT.md`:** §3 harici araçlar — TrendRadar aday repolar + TOON pip + PokieTicker `git clone`; Faz 1 MVP sonrası **Faz 1.5 haber hattı** notu; link → [external/README.md](external/README.md).
+- **`external/README.md`:** PokieTicker + [toon-format/toon](https://github.com/toon-format/toon) + [sansan0/TrendRadar](https://github.com/sansan0/TrendRadar) klon komutları ve Faz A/B/C entegrasyon planı.
+- **`.gitignore`:** yalnızca `external/PokieTicker/`, `external/toon/`, `external/TrendRadar/` hariç; `external/README.md` repoda kalır.
+- **`AI_BROKER_PROJECT.md`:** başlık **v1.2 Faz 1.5-b**, diyagram + §3 güncel durum + klasör ağacı (news_pipeline, analysis_runner, technical_extended; TrendRadar bekliyor).
+- **`.cursor/rules/ai-broker-core.mdc`:** özet paragraf üretim yığınına hizalı (Groq + Ollama; Cerebras yalnız Faz 0 script).
+- **`.cursor/rules/ai-broker-data-and-memory.mdc`**, **`.cursor/rules/ai-broker-python.mdc`:** T212 açık pozisyonlar → **`GET /api/v0/equity/positions`**, rate limit **~1 req/s** (kod ile uyumlu).
+- **`.env.example`:** Faz 1 minimum env açıklaması (üst yorum).
+- **`README.md`:** Faz 1 için minimum `.env` checklist.
+- **`scripts/sync_telegram_allowed_from_updates.py`:** `getUpdates` ile user id(ler)i çekip `TELEGRAM_ALLOWED_USER_IDS` satırını `.env` içinde yazar (botta `/start` sonrası tek komut).
+
+### Added — Faz 1 MVP
+
+- **FastAPI application** (`app/main.py`): async lifespan managing httpx, PTB, Groq, Ollama lifecycle. Single-process, no `@app.on_event`.
+- **T212 client** (`app/services/t212/client.py`): `httpx.AsyncClient` + Basic Auth + **1 req/s** client-side throttle + 429 exponential backoff. Endpoint: official **`GET /api/v0/equity/positions`**.
+- **T212 models** (`app/services/t212/models.py`): Pydantic v2 models matching T212 docs response schema.
+- **Ticker normalisation** (`app/services/t212/ticker_map.py`): `AAPL_US_EQ → AAPL` bidirectional mapping.
+- **Technical analysis** (`app/tools/technical.py`): yfinance OHLCV + pandas-ta RSI(14), SMA(20) via `asyncio.to_thread`.
+- **Groq service** (`app/services/llm/groq_service.py`): `llama-3.3-70b-versatile` + daily usage counters (auto-reset UTC midnight).
+- **Ollama service** (`app/services/llm/ollama_service.py`): `deepseek-r1:14b` fallback with offline detection.
+- **Config** (`app/core/config.py`): `pydantic-settings` — all env vars validated at startup via `get_settings()`.
+- **Structured logging** (`app/core/logging.py`): `ai_broker.*` namespace, component-level loggers.
+- **API routes** (`app/api/routes.py`): `GET /health`, `GET /internal/positions`, `POST /internal/analyze`, `GET /internal/usage`, `POST /telegram/webhook`.
+- **Telegram bot** (`app/bot/`): PTB v21+ `Application` + webhook integration. Commands: `/start`, `/portfolio`, `/analyze SYMBOL`, `/usage`. User allow-list, message splitting.
+- **Webhook security**: `X-Telegram-Bot-Api-Secret-Token` header validation.
+- **Polling mode**: when `TELEGRAM_WEBHOOK_URL` is empty (local dev).
+- **Unit tests**: `test_t212_parse.py`, `test_ticker_map.py`, `test_technical.py` — pytest + pytest-asyncio.
+- **README.md**: Faz 1 setup, env table, API/Telegram command reference.
+
+### Changed
+
+- **`pyproject.toml`**: version `0.1.0 → 1.0.0`; added `fastapi`, `uvicorn[standard]`, `pydantic-settings`, `python-telegram-bot`; removed `cerebras-cloud-sdk` (not on production path per Faz 0 closure); added `[dev]` extras for pytest.
+- **T212 endpoint**: `equity/portfolio` (Faz 0) → **`equity/positions`** (official docs, rate limit 1 req/1s).
+- **`.env.example`**: added `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_ALLOWED_USER_IDS`, `LOG_LEVEL`.
+
+### Added — Faz 0 (preserved)
+
+- **Faz 0 A-lite kapanış:** [faz0_test.py](experiments/model_race/faz0_test.py) — Groq/Cerebras **token usage** (`usage` alanı + konsol özeti), **2 Groq senaryosu** → `results/faz0_scenarios.json`; [faz0_embed_test.py](experiments/model_race/faz0_embed_test.py) — **nomic-embed-text** cosine smoke test (768 boyut).
+- **Groq (Faz 0):** [pyproject.toml](pyproject.toml) dependency `groq`; [faz0_test.py](experiments/model_race/faz0_test.py) lane **`llama-3.3-70b-versatile`**; `GROQ_API_KEY` in [.env.example](.env.example); [README.md](README.md) / [ai-broker-core.mdc](.cursor/rules/ai-broker-core.mdc).
+- **Faz 0 model race:** [pyproject.toml](pyproject.toml) (uv / `uv pip install -e .`), [experiments/model_race/faz0_test.py](experiments/model_race/faz0_test.py), [README.md](README.md) (Kurulum / çalıştırma).
+- **`.env.example`** — Phase 0 keys + `T212_BASE_URL`, `OLLAMA_*`, optional `T212_DEMO_API_SECRET`; **`.gitignore`** includes `results/`, `*.pkl`, `.venv`, etc.
+- `.cursor/rules/ai-broker-engineering-discipline.mdc` — OOP + minimal scope, no orphan code, todos/planning, **Context7** for library docs, CEO escalation when unclear.
+- `.cursor/rules/ai-broker-session-discipline.mdc` — mandatory **start-of-chat** (`CHANGELOG.md` / phase) and **before-done** checks (update `CHANGELOG.md`, and `AI_BROKER_PROJECT.md` / rules when canonical decisions change).
+- Durable Cursor context: `.cursor/rules/` (`ai-broker-core.mdc`, `ai-broker-session-discipline.mdc`, `ai-broker-engineering-discipline.mdc`, `ai-broker-data-and-memory.mdc`, `ai-broker-python.mdc`) and `CHANGELOG.md`.
+- Repository skeleton: `app/modules/*`, `app/services/*` (integrations), `sql/schemas/`, `experiments/model_race/`, etc.
+
+### Changed
+
+- **Faz 0 resmi kapanış (üretim yolu):** Birincil API LLM **Groq llama-3.3-70b**; yedek **Ollama deepseek-r1:14b**; **nomic-embed-text** RAG için kilitli; **hafıza/RAG metni İngilizce**; **Cerebras 8B** ana yol değil; **Gemini** yok. Token/req tahmini ~**35K tok/gün**, ~**200 req/gün** — limit altı. Ayrıntı: [AI_BROKER_PROJECT.md](AI_BROKER_PROJECT.md) *Faz 0 — Kapanış kararları* §4.
+- **Faz 0 kapanış — mimari kararlar** kayıt altına alındı: Groq **günlük token** (~67k örnek yük vs ~500k limit) ve **istek** (~176 örnek vs 14.4k/gün); **T212** yalnızca portföy/güncel pozisyon fiyatı — OHLCV/tarama/haber için **yfinance + Finnhub**; **TrendRadar + TOON + PokieTicker** Faz 1 entegrasyon sırası. Ayrıntı: [AI_BROKER_PROJECT.md](AI_BROKER_PROJECT.md) bölüm *Faz 0 — Kapanış kararları*.
+- **Remove Google Gemini from repo (CTO):** dropped `google-genai` / `GEMINI_API_KEY`; [faz0_test.py](experiments/model_race/faz0_test.py) is Ollama + Cerebras + Groq only. Canonical stack: **Embedding: nomic-embed-text (Ollama local)**; **Haber analizi: Groq llama3.3-70b**. [pyproject.toml](pyproject.toml), [.env.example](.env.example), [README.md](README.md), [AI_BROKER_PROJECT.md](AI_BROKER_PROJECT.md), [.cursor/rules/ai-broker-core.mdc](.cursor/rules/ai-broker-core.mdc), [.cursor/rules/ai-broker-data-and-memory.mdc](.cursor/rules/ai-broker-data-and-memory.mdc).
+- **Cerebras (Faz 0):** [faz0_test.py](experiments/model_race/faz0_test.py) fixed model **`llama3.1-8b`** (replaces `gpt-oss-120b` for Phase 0 quota/access); model missing → `Model bulunamadı: llama3.1-8b`. [.env.example](.env.example) / [README.md](README.md) / [ai-broker-core.mdc](.cursor/rules/ai-broker-core.mdc).
+- [experiments/model_race/faz0_test.py](experiments/model_race/faz0_test.py): Faz 0 **fixed demo** T212 URL (`https://demo.trading212.com/api/v0/equity/portfolio`), updated **prompt** (AMD Teknik formatting + strict JSON note), **Reasoning** column and `reasoning` in JSON results, **`ast.literal_eval`** fallback for model JSON, **Ollama offline** detection for unreachable daemon; Rich table **Süre(s)** / **Reasoning**.
+- **Trading 212** integration aligned with **Public API docs** (Context7): `GET /api/v0/equity/portfolio`, **Basic auth** (key + secret), rate-limit note; [.env.example](.env.example), [README.md](README.md), [.cursor/rules/ai-broker-data-and-memory.mdc](.cursor/rules/ai-broker-data-and-memory.mdc), [ai-broker-python.mdc](.cursor/rules/ai-broker-python.mdc), [ai-broker-core.mdc](.cursor/rules/ai-broker-core.mdc).
+- `.cursor/rules/ai-broker-python.mdc` — Phase 0 benchmark (`experiments/model_race/faz0_test.py`, `results/`).
+- Repository tree: **`src/` → `app/`**; **`integrations/` → `services/`** under that root (e.g. `app/services/t212`). **`app/api`**, **`app/core`**, **`app/modules`**, **`app/workers`** moved with the rename.
+- `.cursor/rules/*.mdc` aligned with updated **`AI_BROKER_PROJECT.md`**: Faz 0 **uv** + `.venv`, **T212 Demo only**, local **Ollama** (`deepseek-r1:14b`, **nomic-embed-text**), **Groq** + **Cerebras**, **TOON** prompts, **PokieTicker** paths (`app/services`, `app/tools`, `app/memory`) and batch-news / pgvector rules.
+- Cursor rules: **all API secrets and sensitive config** must live in **`.env` / environment** — not in source (see `ai-broker-engineering-discipline.mdc`, `ai-broker-python.mdc`).
+- Agent onboarding lives only in **`.cursor/rules/`** (workflow text merged into `ai-broker-core.mdc`). Removed root `AGENTS.md` and `hafıza.md` as redundant with `alwaysApply` rules.
+- All Markdown except `AI_BROKER_PROJECT.md` is **English** (this file + `.cursor/rules/*.mdc`).
+
+### Project status
+
+- **Phase:** **Faz 2 — Kalıcı Hafıza & RAG ✅**.
+- **Canonical architecture doc:** `AI_BROKER_PROJECT.md` (Faz 2 tamamlandı; Nisan 2026).
+- **Next:** `Paper Trading Agent` (Faz 3) otonom yapısı ve ceza/ödül mekanizmaları.
+
+---
+
+## [0.1.0] — 2026-04-27
+
+### Added
+
+- `AI_BROKER_PROJECT.md`: full architecture (pre-development draft).
+- `hafıza.md` and `AGENTS.md` (later removed; see `[Unreleased]`).

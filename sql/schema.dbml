@@ -1,0 +1,110 @@
+// AI Broker — canonical Postgres model for dbdiagram.io
+// SQL migrations: sql/schemas/*.sql (apply order in sql/README.md)
+// Open https://dbdiagram.io → Import → paste this file
+
+Project ai_broker {
+  database_type: 'PostgreSQL'
+  Note: '''
+    match_trade_memories() RPC: sql/schemas/001_memory.sql (not shown as table).
+    paper 002: DROP paper_* on re-run — see file header before applying.
+  '''
+}
+
+Table trade_memories {
+  id bigserial [pk, increment]
+  ticker varchar(10) [not null]
+  memory_type varchar(20) [not null, note: 'LESSON | SUCCESS | WARNING']
+  context text [not null]
+  outcome varchar(10)
+  pnl_percent float
+  opportunity_cost float
+  confidence_score float
+  timeframe varchar(10)
+  embedding "vector(768)" [note: 'HNSW index in 001_memory.sql']
+  created_at timestamptz [default: `now()`]
+}
+
+Table daily_reports {
+  id bigserial [pk, increment]
+  report_date date [not null]
+  content text [not null]
+  report_type varchar(20)
+  ticker varchar(10)
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    (report_date, report_type, ticker) [unique]
+  }
+}
+
+Table trump_posts {
+  post_id varchar(50) [pk]
+  post_text text [not null]
+  image_analysis text
+  posted_at timestamptz [not null]
+  impact_score float
+  sentiment varchar(20)
+  affected_sectors "text[]" [note: 'TEXT[]']
+  affected_tickers "text[]" [note: 'TEXT[]']
+  reasoning text
+  telegram_sent boolean [default: false]
+  created_at timestamptz [default: `now()`]
+
+  indexes {
+    posted_at [name: 'idx_trump_posts_posted_at']
+  }
+}
+
+Table punishment_log {
+  id bigserial [pk, increment]
+  ticker varchar(10) [not null]
+  penalty_type varchar(20) [not null]
+  reason text [not null]
+  expires_at timestamptz
+  created_at timestamptz [default: `now()`]
+}
+
+Table paper_account {
+  id smallint [pk, note: 'single row: CHECK (id = 1) in SQL']
+  balance "double precision" [not null, default: 20000]
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table paper_portfolio {
+  id bigserial [pk, increment]
+  ticker varchar(10) [not null, unique]
+  shares "double precision" [not null]
+  avg_cost "double precision" [not null]
+  current_value "double precision"
+  status varchar(10) [default: 'OPEN']
+  updated_at timestamptz [not null, default: `now()`]
+}
+
+Table paper_trades {
+  id bigserial [pk, increment]
+  ticker varchar(10) [not null]
+  action varchar(4) [not null, note: 'BUY | SELL']
+  shares "double precision" [not null]
+  price "double precision" [not null]
+  total_value "double precision" [not null]
+  reasoning text
+  macro_risk_score "double precision"
+  sentiment_score "double precision"
+  pnl_percent "double precision"
+  realized_pnl_usd "double precision"
+  was_punished boolean [not null, default: false]
+  lesson_written boolean [not null, default: false]
+  created_at timestamptz [not null, default: `now()`]
+  stop_loss "double precision"
+  target "double precision"
+  invalidation_condition text
+  chain_of_thought text
+  cycle_event varchar(32)
+  emergency boolean [not null, default: false]
+  t212_order_id bigint
+  execution_broker varchar(16) [not null, default: 'supabase', note: 'supabase | t212']
+
+  indexes {
+    (ticker, created_at) [name: 'idx_paper_trades_ticker_created_at']
+  }
+}

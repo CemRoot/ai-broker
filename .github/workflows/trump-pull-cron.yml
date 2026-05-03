@@ -1,0 +1,51 @@
+name: trump-pull-cron
+
+# REST polling fallback for Truth Social posts.
+#
+# The TrumpMonitor WebSocket only carries posts authored by accounts the bot
+# token user follows. If the operator has not followed @realDonaldTrump from
+# the bot account, posts never arrive on the live stream. This workflow
+# guarantees coverage by hitting POST /internal/trump/pull every 5 minutes.
+#
+# Required GitHub repository secrets (Settings → Secrets → Actions):
+#   AIBROKER_BASE_URL       e.g. https://broker.example.com
+#   AIBROKER_INTERNAL_KEY   matches INTERNAL_API_KEY on the server
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Statuses to fetch this run"
+        required: false
+        default: "10"
+
+concurrency:
+  group: trump-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Hit /internal/trump/pull
+        env:
+          BASE_URL: ${{ secrets.AIBROKER_BASE_URL }}
+          API_KEY:  ${{ secrets.AIBROKER_INTERNAL_KEY }}
+          LIMIT:    ${{ inputs.limit || '10' }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BASE_URL" ] || [ -z "$API_KEY" ]; then
+            echo "::warning::AIBROKER_BASE_URL or AIBROKER_INTERNAL_KEY missing; skipping."
+            exit 0
+          fi
+          resp=$(curl -fsS --max-time 30 \
+            -X POST "$BASE_URL/internal/trump/pull?limit=$LIMIT" \
+            -H "X-Internal-Api-Key: $API_KEY" \
+            -H "Accept: application/json") || {
+              echo "::error::trump pull request failed"; exit 1; }
+          echo "$resp"
+          new_posts=$(echo "$resp" | python -c 'import json,sys;print(json.load(sys.stdin).get("new_posts",0))')
+          echo "::notice::Trump pull OK — new_posts=$new_posts"
