@@ -8,11 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-03T21:30:00+03:00`:** **`docker-compose.yml` — `ollama` servisi `curl` ile healthcheck kullanıyordu; resmi `ollama/ollama` imajında `curl` yok → konteyner daima **unhealthy**, `ai-broker` `depends_on: service_healthy` ile başlamıyordu (OCI ARM dahil).** Healthcheck **`ollama list`** olacak şekilde değiştirildi; `start_period` **120s**, **retries: 10** (yavaş ilk açılış). **`docs/FAZ4_DEPLOY.md`** kısa sorun giderme notu.
+
 - **`2026-05-03T14:50:00+03:00`:** **GitHub Actions — `test_cosine_similarity_logic` CI’da kırılıyordu (runner’da Ollama yok; embedder `[0.0]*768` dönünce cosine assert başarısız).** `pytest` marker **`ollama`** (`pyproject.toml`); **`tests/unit/test_retriever.py`** ve **`test_embedder.py`** gerçek embedding gerektiren testler işaretlendi; **`ci.yml`** birim test adımı `-m "not ollama"`. **`README.md`** §10 test komutları + §9 CI tablo satırı güncellendi. Yerelde tam doğrulama: `uv run pytest tests/unit -v`.
 
 - **`2026-05-03T14:45:00+03:00`:** **GitHub Actions `ci.yml` — `uv run ruff` runner’da “No such file” (ruff paketi dev extra’da yoktu).** `pyproject.toml` **`dev`** grubuna `ruff>=0.8` eklendi; `uv.lock` güncellendi. Ruff **`app` / `tests` / `scripts`** üzerinde çalıştırıldı: otomatik düzeltmeler (gereksiz import, gereksiz `f` öneki vb.); **`scripts/smoke_runpaper_local.py`** için `sys.path` bootstrap sonrası import’lar **`E402`** `per-file-ignores`. Yerelde **95 unit test** yeşil.
 
 ### Added
+
+- **`2026-05-03T18:00:00+03:00`:** **Ubuntu VPS bootstrap script:** [`scripts/bootstrap_ubuntu_ai_broker.sh`](scripts/bootstrap_ubuntu_ai_broker.sh) — `docker.io`, **`docker compose`** (paket veya v2.32.4 CLI plugin yedek), UFW, mimari seçimli **cloudflared** `.deb` (**amd64/arm64**). **Host systemd Ollama yok** (`docker-compose.yml` içindeki `ollama` ile çakışmayı önler). **`docs/FAZ4_DEPLOY.md`** — “Ubuntu sunucu — tek seferlik host kurulumu” bölümü ve son adım komutları.
 
 - **`2026-05-03T14:30:00+03:00`:** **Git repository + GitHub remote (CEO direktifi).** Yerelde `git init -b main`, ilk commit (**137 dosya**, `.env` / `AI_BROKER_PROJECT.md` / `ai-broker-todo.md` hariç `.gitignore` ile). **`gh repo create`** ile **private** repo [**github.com/CemRoot/ai-broker**](https://github.com/CemRoot/ai-broker), `origin` → `main` push. **`README.md`** CI badge → Actions SVG; Project status’a Git remote linki. **Sonraki adım (manuel):** Repo **Settings → Secrets and variables → Actions** içinde `AIBROKER_BASE_URL` ve `AIBROKER_INTERNAL_KEY` (cron + healthcheck için; README §9).
 

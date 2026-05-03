@@ -2,6 +2,17 @@
 
 Bu doküman `AI_BROKER_PROJECT.md` Faz 4 hedefleriyle uyumludur: Docker, compose, tünel, kapasite ve gözlemlenebilirlik notları.
 
+## Ubuntu sunucu — tek seferlik host kurulumu
+
+Fresh VPS’te (Ubuntu 22.04/24.04) kök olarak:
+
+```bash
+# Repoyu önce klonlamadan da çalıştırabilirsiniz: ham dosyayı çekin veya scp ile gönderin.
+sudo bash scripts/bootstrap_ubuntu_ai_broker.sh
+```
+
+Script: **`docker.io`** + **`docker compose`**, **UFW** (22/80/443/8000), mimariye göre **cloudflared** `.deb` (**amd64** veya **arm64**), proje dizini (`ubuntu` veya `opc` kullanıcısı). **Host üzerinde systemd Ollama kurmaz** — `docker-compose.yml` içindeki **`ollama`** servisi kullanılır (11434 çakışması olmasın diye). Sonra: repo + `.env`, `docker compose up --build -d`, `docker compose exec ollama ollama pull nomic-embed-text`.
+
 ## Docker imajı
 
 - **Dockerfile:** multi-stage; çalışma imajı `python:3.12-slim-bookworm` + `uv sync --frozen --no-dev` ile üretilen `.venv`.
@@ -25,6 +36,7 @@ curl -s http://127.0.0.1:8000/health
   - `docker compose exec ollama ollama pull deepseek-r1:14b`
   - `docker compose exec ollama ollama pull nomic-embed-text`
 - **GPU:** `docker-compose.yml` içindeki NVIDIA örneği yorumunu açın (Linux + `nvidia-container-toolkit` gerekir). macOS’ta genelde CPU inference.
+- **Sorun giderme — `ollama` unhealthy:** Resmi imajda `curl` yok; eski compose’ta `curl` ile healthcheck kullanılıyorsa konteyner sürekli **unhealthy** kalır ve `ai-broker` `depends_on` yüzünden ayağa kalkmaz. Güncel `docker-compose.yml` **`ollama list`** kullanır. Doğrulama: `docker inspect … --format '{{json .State.Health}}'` ve `docker logs … ollama`.
 
 ## Cloudflare Tunnel (Telegram webhook)
 

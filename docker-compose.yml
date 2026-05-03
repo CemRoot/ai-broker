@@ -57,12 +57,13 @@ services:
       - "11434:11434"
     restart: unless-stopped
     healthcheck:
-      # /api/tags returns JSON when the daemon is ready to serve requests.
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:11434/api/tags"]
-      interval: 30s
-      timeout: 8s
-      start_period: 30s
-      retries: 5
+      # Official ollama/ollama image has no curl (healthcheck would always fail).
+      # `ollama list` hits the local daemon — same readiness signal as /api/tags.
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 10
     logging:
       driver: json-file
       options:
