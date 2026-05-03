@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-03T22:15:00+03:00`:** **`docs/FAZ4_DEPLOY.md` — VPS’te `docker-compose.yml` için yerel `sed`/manuel diff yüzünden `git pull` abort + eski `curl` healthcheck’in kalması:** stash/`reset --hard origin/main` + `compose up --build` adımları sorun giderme maddesi olarak eklendi.
+
 - **`2026-05-03T21:30:00+03:00`:** **`docker-compose.yml` — `ollama` servisi `curl` ile healthcheck kullanıyordu; resmi `ollama/ollama` imajında `curl` yok → konteyner daima **unhealthy**, `ai-broker` `depends_on: service_healthy` ile başlamıyordu (OCI ARM dahil).** Healthcheck **`ollama list`** olacak şekilde değiştirildi; `start_period` **120s**, **retries: 10** (yavaş ilk açılış). **`docs/FAZ4_DEPLOY.md`** kısa sorun giderme notu.
 
 - **`2026-05-03T14:50:00+03:00`:** **GitHub Actions — `test_cosine_similarity_logic` CI’da kırılıyordu (runner’da Ollama yok; embedder `[0.0]*768` dönünce cosine assert başarısız).** `pytest` marker **`ollama`** (`pyproject.toml`); **`tests/unit/test_retriever.py`** ve **`test_embedder.py`** gerçek embedding gerektiren testler işaretlendi; **`ci.yml`** birim test adımı `-m "not ollama"`. **`README.md`** §10 test komutları + §9 CI tablo satırı güncellendi. Yerelde tam doğrulama: `uv run pytest tests/unit -v`.

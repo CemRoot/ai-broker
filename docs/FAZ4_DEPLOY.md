@@ -37,6 +37,7 @@ curl -s http://127.0.0.1:8000/health
   - `docker compose exec ollama ollama pull nomic-embed-text`
 - **GPU:** `docker-compose.yml` içindeki NVIDIA örneği yorumunu açın (Linux + `nvidia-container-toolkit` gerekir). macOS’ta genelde CPU inference.
 - **Sorun giderme — `ollama` unhealthy:** Resmi imajda `curl` yok; eski compose’ta `curl` ile healthcheck kullanılıyorsa konteyner sürekli **unhealthy** kalır ve `ai-broker` `depends_on` yüzünden ayağa kalkmaz. Güncel `docker-compose.yml` **`ollama list`** kullanır. Doğrulama: `docker inspect … --format '{{json .State.Health}}'` ve `docker logs … ollama`.
+- **`git pull` — “local changes would be overwritten … docker-compose.yml”:** VPS’te bir kerelik `sed`/elle yapılan compose değişiklikleri commit’li değilse merge bloklanır. **Çözüm (sadece bu repo için yerel diff’i atmak OK):** `git stash push -m compose docker-compose.yml && git pull && git stash drop` **veya** `git fetch origin && git reset --hard origin/main`. Sonra `docker compose down && docker compose up -d --build`.
 
 ## Cloudflare Tunnel (Telegram webhook)
 
