@@ -1,5 +1,4 @@
 import pytest
-import os
 import math
 from app.memory.embedder import OllamaEmbedder
 from app.memory.database import SupabaseDatabase, DatabaseSettings

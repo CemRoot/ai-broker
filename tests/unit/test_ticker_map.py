@@ -4,7 +4,6 @@ Unit tests for T212 ↔ yfinance ticker normalisation.
 
 from __future__ import annotations
 
-import pytest
 
 from app.services.t212.ticker_map import t212_to_yfinance, yfinance_to_t212
 

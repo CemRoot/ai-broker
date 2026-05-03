@@ -1,9 +1,9 @@
 import logging
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional
 import asyncpg
 
 from app.memory.database import SupabaseDatabase
-from app.services.paper.models import PaperAccount, PaperPosition, PaperTrade
+from app.services.paper.models import PaperPosition, PaperTrade
 from app.services.t212.client import T212Client
 
 log = logging.getLogger(__name__)

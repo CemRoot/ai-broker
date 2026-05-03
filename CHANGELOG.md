@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`2026-05-03T14:45:00+03:00`:** **GitHub Actions `ci.yml` — `uv run ruff` runner’da “No such file” (ruff paketi dev extra’da yoktu).** `pyproject.toml` **`dev`** grubuna `ruff>=0.8` eklendi; `uv.lock` güncellendi. Ruff **`app` / `tests` / `scripts`** üzerinde çalıştırıldı: otomatik düzeltmeler (gereksiz import, gereksiz `f` öneki vb.); **`scripts/smoke_runpaper_local.py`** için `sys.path` bootstrap sonrası import’lar **`E402`** `per-file-ignores`. Yerelde **95 unit test** yeşil.
+
 ### Added
 
 - **`2026-05-03T14:30:00+03:00`:** **Git repository + GitHub remote (CEO direktifi).** Yerelde `git init -b main`, ilk commit (**137 dosya**, `.env` / `AI_BROKER_PROJECT.md` / `ai-broker-todo.md` hariç `.gitignore` ile). **`gh repo create`** ile **private** repo [**github.com/CemRoot/ai-broker**](https://github.com/CemRoot/ai-broker), `origin` → `main` push. **`README.md`** CI badge → Actions SVG; Project status’a Git remote linki. **Sonraki adım (manuel):** Repo **Settings → Secrets and variables → Actions** içinde `AIBROKER_BASE_URL` ve `AIBROKER_INTERNAL_KEY` (cron + healthcheck için; README §9).

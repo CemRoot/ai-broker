@@ -1,5 +1,4 @@
 import pytest
-import os
 from app.memory.embedder import OllamaEmbedder
 
 @pytest.mark.asyncio

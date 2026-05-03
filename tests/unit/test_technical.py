@@ -4,11 +4,10 @@ Unit tests for the technical analysis module.
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from app.tools.technical import _compute_technicals, TechnicalSummary
 

@@ -4,7 +4,6 @@ Unit tests for T212 response parsing (Position / Instrument models).
 
 from __future__ import annotations
 
-import pytest
 
 from app.services.t212.models import Position, Instrument
 

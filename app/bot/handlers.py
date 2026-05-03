@@ -526,7 +526,7 @@ async def paper_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _send_long(update, f"❌ Veritabanı hatası: {exc}")
         return
 
-    lines = [f"💼 *Sanal Portföy (Paper Agent)*\n", f"_Defter para birimi: {ledger_cur}_\n"]
+    lines = ["💼 *Sanal Portföy (Paper Agent)*\n", f"_Defter para birimi: {ledger_cur}_\n"]
     lines.append(f"💵 Nakit Bakiye: *{balance:,.2f} {ledger_cur}*")
     
     if not positions:

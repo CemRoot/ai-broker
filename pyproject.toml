@@ -31,6 +31,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-httpx>=0.35",
+    "ruff>=0.8",
 ]
 
 # PokieTicker / toon-spec: optional clones under external/ (see AI_BROKER_PROJECT.md, Faz 0 closing notes).
@@ -45,3 +46,7 @@ include = ["app*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# smoke_runpaper_local prepends repo root to sys.path before app imports.
+[tool.ruff.lint.per-file-ignores]
+"scripts/smoke_runpaper_local.py" = ["E402"]
