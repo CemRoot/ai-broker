@@ -12,6 +12,7 @@ def cosine_similarity(v1, v2):
         return 0.0
     return dot_product / (norm_a * norm_b)
 
+@pytest.mark.ollama
 @pytest.mark.asyncio
 async def test_cosine_similarity_logic():
     """Test raw cosine similarity output of our embedder to verify A-B > 0.7, A-C < 0.5."""

@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-03T14:50:00+03:00`:** **GitHub Actions — `test_cosine_similarity_logic` CI’da kırılıyordu (runner’da Ollama yok; embedder `[0.0]*768` dönünce cosine assert başarısız).** `pytest` marker **`ollama`** (`pyproject.toml`); **`tests/unit/test_retriever.py`** ve **`test_embedder.py`** gerçek embedding gerektiren testler işaretlendi; **`ci.yml`** birim test adımı `-m "not ollama"`. **`README.md`** §10 test komutları + §9 CI tablo satırı güncellendi. Yerelde tam doğrulama: `uv run pytest tests/unit -v`.
+
 - **`2026-05-03T14:45:00+03:00`:** **GitHub Actions `ci.yml` — `uv run ruff` runner’da “No such file” (ruff paketi dev extra’da yoktu).** `pyproject.toml` **`dev`** grubuna `ruff>=0.8` eklendi; `uv.lock` güncellendi. Ruff **`app` / `tests` / `scripts`** üzerinde çalıştırıldı: otomatik düzeltmeler (gereksiz import, gereksiz `f` öneki vb.); **`scripts/smoke_runpaper_local.py`** için `sys.path` bootstrap sonrası import’lar **`E402`** `per-file-ignores`. Yerelde **95 unit test** yeşil.
 
 ### Added

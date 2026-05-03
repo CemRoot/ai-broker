@@ -1,6 +1,7 @@
 import pytest
 from app.memory.embedder import OllamaEmbedder
 
+@pytest.mark.ollama
 @pytest.mark.asyncio
 async def test_embedder_returns_768d_vector():
     embedder = OllamaEmbedder()

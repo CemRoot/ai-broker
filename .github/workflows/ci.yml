@@ -37,7 +37,7 @@ jobs:
         run: uv run ruff check app tests scripts
 
       - name: Unit tests
-        run: uv run pytest tests/unit -q
+        run: uv run pytest tests/unit -q -m "not ollama"
 
       - name: Integration tests (offline-safe ones only)
         run: uv run pytest tests/integration -q -k "not e2e and not live"

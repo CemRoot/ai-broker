@@ -316,7 +316,7 @@ The bot is a **stateful long-running process** (FastAPI + asyncio + WebSocket cl
 | Public Telegram webhook URL | **Cloudflare Tunnel** in front of the VPS | Free TLS, no port forwarding, spam-protected |
 | Trump posts when the WebSocket is silent (e.g. bot account does not follow Trump) | **GitHub Actions cron** every 5 min → `POST /internal/trump/pull` | Guarantees coverage independent of WebSocket |
 | Hourly liveness probe + email-on-failure | **GitHub Actions cron** every hour → `GET /health` | Free 24/7 monitoring, no Pingdom needed |
-| CI on push / PR | **GitHub Actions** (`ci.yml`) — ruff + pytest | Free for public repos / Student Pro |
+| CI on push / PR | **GitHub Actions** (`ci.yml`) — ruff + pytest (`-m "not ollama"`) | Runners have no Ollama; full embedding checks stay local |
 | Heavy local LLM (Ollama 14B at 7×24) | Optional **Hetzner GEX44** (€189/mo) per [`docs/FAZ4_DEPLOY.md`](docs/FAZ4_DEPLOY.md) | Only if you want to eliminate Groq tokens entirely |
 
 The three workflow files live in [`.github/workflows/`](.github/workflows). They need only two repository secrets — `AIBROKER_BASE_URL` and `AIBROKER_INTERNAL_KEY` — both set in **Settings → Secrets and variables → Actions**.
@@ -328,6 +328,9 @@ The three workflow files live in [`.github/workflows/`](.github/workflows). They
 ```bash
 # Full test suite (unit + offline integration)
 uv run pytest tests/ -q
+
+# Same subset GitHub Actions runs (unit tests that do not call Ollama)
+uv run pytest tests/unit -q -m "not ollama"
 
 # Lint
 uv run ruff check app tests scripts

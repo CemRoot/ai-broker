@@ -46,6 +46,9 @@ include = ["app*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "ollama: requires a reachable Ollama API (skipped on GitHub Actions CI)",
+]
 
 # smoke_runpaper_local prepends repo root to sys.path before app imports.
 [tool.ruff.lint.per-file-ignores]
