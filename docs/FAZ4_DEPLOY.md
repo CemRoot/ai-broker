@@ -45,6 +45,7 @@ curl -s http://127.0.0.1:8000/health
 2. Örnek: `cloudflared tunnel --url http://127.0.0.1:8000` (hızlı test) veya named tunnel + DNS.
 3. `.env`: `TELEGRAM_WEBHOOK_URL=https://<senin-domainin>` (sonunda `/telegram/webhook` **ekleme** — uygulama path’i kendisi birleştirir; bkz. `app/main.py`).
 4. `TELEGRAM_WEBHOOK_SECRET` doldurun; Telegram’da secret token ayarıyla uyumlu olsun.
+5. **Public Hostname tablosundaki “Origin configurations” sütununda `0` görünmesi** çoğu zaman **ek origin policy sayısı**dır; **connector’ın çalışmadığı** anlamına gelmez. Doğrulama: dış ağdan `curl -sS https://<hostname>/health` → HTTP **200** ve JSON; veya Tunnel sayfasında **Status: Healthy** / log’da `Registered tunnel connection`.
 
 ## OCI ARM (ör. 4 vCPU / 24GB)
 

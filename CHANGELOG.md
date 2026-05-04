@@ -8,6 +8,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-04T02:00:00+03:00`:** **`docs/FAZ4_DEPLOY.md` — Cloudflare Public Hostname tablosunda “Origin configurations: 0” görününce tünel kopuk sanılabiliyor;** açıklama eklendi: dış doğrulama `curl https://…/health` ve Tunnel **Registered connection** log’ları esas alınmalı.
+
+- **`2026-05-04T01:30:00+03:00`:** **`docker-compose.yml` — `ai-broker` konteyneri restart loop’unda kalıyordu (`pandas_ta`/`numba` import-time `RuntimeError: cannot cache function 'fibonacci': no locator available …` hatası).** Konteyner `read_only: true` + `tmpfs: /tmp` ile çalışıyor; `numba` JIT cache’ini `site-packages` yanına yazmaya çalışıyor → izin yok. **`NUMBA_CACHE_DIR=/tmp/numba`** environment değişkeni eklendi (tmpfs içine yazıyor; konteyner restart’ında temizlenmesi pratik etkisi yok). Canlı doğrulama: `ai-broker` Up + `/health` JSON dönüyor.
+
 - **`2026-05-03T22:15:00+03:00`:** **`docs/FAZ4_DEPLOY.md` — VPS’te `docker-compose.yml` için yerel `sed`/manuel diff yüzünden `git pull` abort + eski `curl` healthcheck’in kalması:** stash/`reset --hard origin/main` + `compose up --build` adımları sorun giderme maddesi olarak eklendi.
 
 - **`2026-05-03T21:30:00+03:00`:** **`docker-compose.yml` — `ollama` servisi `curl` ile healthcheck kullanıyordu; resmi `ollama/ollama` imajında `curl` yok → konteyner daima **unhealthy**, `ai-broker` `depends_on: service_healthy` ile başlamıyordu (OCI ARM dahil).** Healthcheck **`ollama list`** olacak şekilde değiştirildi; `start_period` **120s**, **retries: 10** (yavaş ilk açılış). **`docs/FAZ4_DEPLOY.md`** kısa sorun giderme notu.
