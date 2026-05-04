@@ -31,6 +31,8 @@ docker compose up --build -d
 curl -s http://127.0.0.1:8000/health
 ```
 
+- **`.env` değişince:** `docker compose restart ai-broker` çoğu zaman **host `.env`’deki yeni değişkenleri konteynere taşımaz** (env ilk `up` anında sabitlenir). Yenilemek için: `docker compose up -d --force-recreate ai-broker` (veya `down` + `up`).
+
 - **`OLLAMA_BASE_URL`:** compose dosyası `http://ollama:11434` yazar; host `.env` içindeki `localhost` üzerine yazar.
 - **Modeller (ilk kurulum):** Ollama konteynerinde:
   - `docker compose exec ollama ollama pull deepseek-r1:14b`

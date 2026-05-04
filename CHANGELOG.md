@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-04T02:30:00+03:00`:** **Üretim VPS — Telegram webhook + GitHub Actions secrets.** `TELEGRAM_WEBHOOK_URL` / `TELEGRAM_WEBHOOK_SECRET` `.env`’e yazıldı; **`docker compose restart` yeni env’i taşımadığı** için `docker compose up -d --force-recreate ai-broker` ile yenilendi → `/health` **`mode: webhook`**, **`webhook_base_configured: true`**. VPS’te **`INTERNAL_API_KEY` boştu** → güvenli rastgele değer üretildi, aynı değer **`gh secret set AIBROKER_INTERNAL_KEY`** ile GitHub’a verildi; **`AIBROKER_BASE_URL`** = `https://broker.cemkoyluoglu.codes`. **`docs/FAZ4_DEPLOY.md`** — `.env` değişince `--force-recreate` notu.
+
 - **`2026-05-04T02:00:00+03:00`:** **`docs/FAZ4_DEPLOY.md` — Cloudflare Public Hostname tablosunda “Origin configurations: 0” görününce tünel kopuk sanılabiliyor;** açıklama eklendi: dış doğrulama `curl https://…/health` ve Tunnel **Registered connection** log’ları esas alınmalı.
 
 - **`2026-05-04T01:30:00+03:00`:** **`docker-compose.yml` — `ai-broker` konteyneri restart loop’unda kalıyordu (`pandas_ta`/`numba` import-time `RuntimeError: cannot cache function 'fibonacci': no locator available …` hatası).** Konteyner `read_only: true` + `tmpfs: /tmp` ile çalışıyor; `numba` JIT cache’ini `site-packages` yanına yazmaya çalışıyor → izin yok. **`NUMBA_CACHE_DIR=/tmp/numba`** environment değişkeni eklendi (tmpfs içine yazıyor; konteyner restart’ında temizlenmesi pratik etkisi yok). Canlı doğrulama: `ai-broker` Up + `/health` JSON dönüyor.
