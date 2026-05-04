@@ -103,17 +103,32 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
             "account_currency": currency,
             "total_value": None,
             "cash_available": None,
+            "cash_blocked": None,
             "position_count": 0,
             "positions": [],
+            "pending_orders": [],
+            "pending_orders_count": 0,
+            "pending_orders_error": None,
             "cached_age_s": 0.0,
         }
         try:
             summary = await t212.get_account_summary()
             pos_live = await t212.get_positions()
+            # Pending orders — separate ``GET /equity/orders`` (1 req / 5s).
+            # If this fails, we still want positions/summary to render, so we
+            # downgrade the failure to a list and an inline error.
+            pending_raw: list[dict[str, Any]] = []
+            pending_error: str | None = None
+            try:
+                pending_raw = await t212.get_all_pending_orders()
+            except Exception as exc:
+                pending_error = f"{type(exc).__name__}: {exc!s}"[:200]
+                log.warning("public live T212 pending orders fetch failed: %s", exc)
             acct_cur = str(summary.get("currency") or currency or "USD").upper()[:3]
             tv = float(summary.get("totalValue") or 0.0)
             cash_b = summary.get("cash") or {}
             avail = float(cash_b.get("availableToTrade") or 0.0)
+            blocked = float(cash_b.get("blocked") or 0.0)
             pos_out: list[dict[str, Any]] = []
             for p in sorted(pos_live, key=lambda x: x.ticker):
                 yf = t212_to_yfinance(p.ticker)
@@ -133,6 +148,39 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
                         "ppl_percent": round(float(p.pnl_percent), 4),
                     }
                 )
+            pending_out: list[dict[str, Any]] = []
+            for o in pending_raw:
+                # Trading 212 schema: id, ticker, quantity (signed), type
+                # (MARKET|LIMIT|STOP|STOP_LIMIT), limitPrice, stopPrice,
+                # filledQuantity, filledValue, value (notional, signed),
+                # status, creationTime, strategy ('QUANTITY'|'VALUE').
+                # See https://t212public-api-docs.redoc.ly/.
+                qty = float(o.get("quantity") or 0.0)
+                value_signed = o.get("value")
+                notional = abs(float(value_signed)) if value_signed is not None else None
+                pending_out.append(
+                    {
+                        "order_id": o.get("id"),
+                        "t212_ticker": o.get("ticker"),
+                        "symbol": t212_to_yfinance(o.get("ticker") or ""),
+                        "side": "BUY" if qty >= 0 else "SELL",
+                        "quantity": abs(qty),
+                        "type": (o.get("type") or "").upper(),
+                        "limit_price": (
+                            round(float(o["limitPrice"]), 4)
+                            if o.get("limitPrice") is not None
+                            else None
+                        ),
+                        "stop_price": (
+                            round(float(o["stopPrice"]), 4)
+                            if o.get("stopPrice") is not None
+                            else None
+                        ),
+                        "notional": round(notional, 2) if notional is not None else None,
+                        "status": o.get("status"),
+                        "created_at": o.get("creationTime"),
+                    }
+                )
             out = {
                 "ok": True,
                 "fetched_at": fetched_iso,
@@ -140,8 +188,12 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
                 "account_currency": acct_cur,
                 "total_value": round(tv, 2),
                 "cash_available": round(avail, 2),
+                "cash_blocked": round(blocked, 2),
                 "position_count": len(pos_out),
                 "positions": pos_out,
+                "pending_orders": pending_out,
+                "pending_orders_count": len(pending_out),
+                "pending_orders_error": pending_error,
                 "cached_age_s": 0.0,
             }
         except Exception as exc:

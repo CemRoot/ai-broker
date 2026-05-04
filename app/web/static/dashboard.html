@@ -440,6 +440,35 @@
       </div>
     </div>
 
+    <div class="card" id="pending-card" style="margin-bottom:1.25rem" hidden>
+      <div class="card-h">
+        <span>Pending orders <span id="pending-count" style="color:var(--muted);font-weight:400">·</span></span>
+        <span id="pending-src" style="color:var(--muted)">Trading 212 · GET /equity/orders</span>
+      </div>
+      <p class="data-strip" style="margin:0.5rem 0.75rem 0;font-size:0.7rem">
+        Live orders sitting in the broker queue (limit/stop awaiting trigger, or market orders queued outside RTH). Notional is reserved from cash and reduces <em>cash_available</em>; it stays inside <em>total value</em> until the fill happens.
+      </p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>T212 ticker</th>
+              <th>Side</th>
+              <th>Type</th>
+              <th>Qty</th>
+              <th>Limit</th>
+              <th>Stop</th>
+              <th>Notional</th>
+              <th>Status</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="pending-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="grid2">
       <div class="card">
         <div class="card-h">
@@ -447,7 +476,7 @@
           <span>UTC · last 14 sessions with sells</span>
         </div>
         <div class="card-b">
-          <div class="chart-h"><canvas id="pnlChart" aria-label="Bar chart of realized profit and loss by UTC day"></canvas></div>
+          <div class="chart-h" id="pnl-chart-host" aria-label="Bar chart of realized profit and loss by UTC day"></div>
         </div>
       </div>
       <div class="card">
@@ -498,18 +527,15 @@
     </div>
   </main>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" crossorigin="anonymous"></script>
   <footer>
-    Paper / demo context — not investment advice. Open positions and total value use the Trading 212 Public API on each refresh when <code>PAPER_EXECUTION_BACKEND=t212</code>; otherwise the Supabase ledger estimate is shown. Trade rows are the Supabase audit mirror and can lag behind fills.<br />
-    Refreshes automatically · Chart.js 4 · <span id="ft-ver"></span>
+    Paper / demo context — not investment advice. Open positions and total value use the Trading 212 Public API on each refresh when <code>PAPER_EXECUTION_BACKEND=t212</code>; otherwise the Supabase ledger estimate is shown. Pending orders reflect <code>GET /equity/orders</code> on T212 (cached up to 60s). Trade rows are the Supabase audit mirror and can lag behind fills.<br />
+    Refreshes automatically · self-hosted SVG chart · <span id="ft-ver"></span>
   </footer>
 
   <script>
 (function () {
   const fmtMoney = (cur, n) => new Intl.NumberFormat(undefined, { style: 'currency', currency: cur || 'USD', maximumFractionDigits: 2 }).format(n);
   const fmtPct = (x) => (x >= 0 ? '+' : '') + x.toFixed(2) + '%';
-  let pnlChart;
-
   function pillClass(a) {
     const u = (a || '').toUpperCase();
     if (u === 'BUY') return 'pill pill-buy';
@@ -554,10 +580,31 @@
     document.getElementById('ft-ver').textContent = 'API v' + h.version;
   }
 
+  function ageHours(iso) {
+    if (!iso) return null;
+    try {
+      const ms = Date.now() - new Date(iso).getTime();
+      return ms > 0 ? ms / 3600000 : 0;
+    } catch (_) { return null; }
+  }
+
+  function staleBadge(iso, thresholdH) {
+    const h = ageHours(iso);
+    if (h == null || h < (thresholdH || 6)) return '';
+    const lab = h >= 24 ? Math.round(h / 24) + 'd' : Math.round(h) + 'h';
+    return ' <span style="background:rgba(251,191,36,0.18);color:var(--amber);padding:0.05rem 0.4rem;border-radius:4px;font-family:var(--mono);font-size:0.65rem">STALE · ' + lab + ' old</span>';
+  }
+
   function renderDecisions(cycles) {
     const root = document.getElementById('decisions');
+    const meta = document.getElementById('dec-meta');
     root.innerHTML = '';
     const c0 = cycles && cycles[0];
+    if (meta) {
+      meta.innerHTML = c0
+        ? 'PaperAgent cycle · ' + (c0.event || '') + staleBadge(c0.created_at, 6)
+        : 'PaperAgent cycle';
+    }
     if (!c0 || !c0.decisions || !c0.decisions.length) {
       root.innerHTML = '<div class="log-item"><div class="why">No structured decisions yet — run a PaperAgent cycle.</div></div>';
       return;
@@ -567,7 +614,7 @@
       div.className = 'log-item';
       const conf = typeof d.confidence === 'number' ? Math.round(d.confidence * 100) : null;
       div.innerHTML =
-        '<div class="log-meta">' + (c0.created_at || '').replace('T', ' ').replace('+00:00', ' UTC') + ' · ' + (c0.event || '') + '</div>' +
+        '<div class="log-meta">' + (c0.created_at || '').replace('T', ' ').replace('+00:00', ' UTC') + ' · ' + (c0.event || '') + staleBadge(c0.created_at, 6) + '</div>' +
         '<div class="pillrow"><span class="' + pillClass(d.action) + '">' + (d.action || '') + '</span> <span class="sym">' + (d.ticker || '') + '</span></div>' +
         '<div class="why">' + (d.reasoning || '—') + '</div>' +
         (conf != null ? '<div class="bar"><i style="width:' + Math.min(100, conf) + '%"></i></div>' : '');
@@ -585,7 +632,7 @@
       return;
     }
     meta.className = '';
-    meta.textContent = (c0.event || '') + ' · ' + (c0.created_at || '').slice(0, 19).replace('T', ' ');
+    meta.innerHTML = (c0.event || '') + ' · ' + (c0.created_at || '').slice(0, 19).replace('T', ' ') + staleBadge(c0.created_at, 6);
     body.textContent = c0.analysis_excerpt || '—';
   }
 
@@ -742,63 +789,136 @@
     }
   }
 
-  function renderPnlChart(cur, days) {
-    if (typeof Chart === 'undefined') return;
-    const el = document.getElementById('pnlChart');
-    const labels = (days || []).map((d) => (d.day || '').slice(5));
-    const vals = (days || []).map((d) => d.realized || 0);
-    const col = vals.map((v) => (v >= 0 ? 'rgba(52,211,153,0.85)' : 'rgba(248,113,113,0.9)'));
-    if (pnlChart) pnlChart.destroy();
-    const ctx = el.getContext('2d');
-    try {
-    pnlChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: labels.length ? labels : ['—'],
-        datasets: [{
-          label: 'Realized ' + cur,
-          data: labels.length ? vals : [0],
-          backgroundColor: labels.length ? col : 'rgba(123,138,157,0.3)',
-          borderRadius: 4,
-          borderSkipped: false,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: '#0e1318',
-            borderColor: 'rgba(255,255,255,0.1)',
-            borderWidth: 1,
-            titleFont: { family: 'IBM Plex Mono', size: 11 },
-            bodyFont: { family: 'IBM Plex Mono', size: 12 },
-            callbacks: {
-              label: (c) => fmtMoney(cur, c.parsed.y),
-            },
-          },
-        },
-        scales: {
-          x: {
-            grid: { color: 'rgba(255,255,255,0.04)' },
-            ticks: { color: '#7b8a9d', font: { family: 'IBM Plex Mono', size: 10 } },
-          },
-          y: {
-            grid: { color: 'rgba(255,255,255,0.04)' },
-            ticks: {
-              color: '#7b8a9d',
-              font: { family: 'IBM Plex Mono', size: 10 },
-              callback: (v) => fmtMoney(cur, v),
-            },
-          },
-        },
-      },
-    });
-    } catch (e) {
-      console.warn('Chart render skipped', e);
+  function renderPending(cur, d) {
+    const card = document.getElementById('pending-card');
+    const tb = document.getElementById('pending-tbody');
+    const cnt = document.getElementById('pending-count');
+    const src = document.getElementById('pending-src');
+    const ta = d.t212_account || {};
+    const rows = ta.pending_orders || [];
+    if (!ta.ok) { card.hidden = true; return; }
+    if (ta.pending_orders_error) {
+      card.hidden = false;
+      cnt.textContent = '· error';
+      src.textContent = 'T212 orders error: ' + ta.pending_orders_error;
+      tb.innerHTML = '<tr><td colspan="10" style="color:var(--muted)">Pending orders unavailable.</td></tr>';
+      return;
     }
+    if (!rows.length) { card.hidden = true; return; }
+    card.hidden = false;
+    cnt.textContent = '· ' + rows.length + (rows.length === 1 ? ' order' : ' orders');
+    src.textContent = 'Trading 212 · GET /equity/orders · ' + (ta.fetched_at || '').slice(11, 19) + ' UTC';
+    tb.innerHTML = '';
+    for (const o of rows) {
+      const tr = document.createElement('tr');
+      const created = (o.created_at || '').replace('T', ' ').slice(0, 16);
+      tr.innerHTML =
+        '<td>' + (o.symbol || '') + '</td>' +
+        '<td style="color:var(--muted)">' + (o.t212_ticker || '') + '</td>' +
+        '<td class="' + (o.side === 'SELL' ? 'neg' : 'pos') + '">' + (o.side || '') + '</td>' +
+        '<td>' + (o.type || '') + '</td>' +
+        '<td>' + (o.quantity != null ? Number(o.quantity).toFixed(4) : '—') + '</td>' +
+        '<td>' + (o.limit_price != null ? fmtMoney(cur, o.limit_price) : '—') + '</td>' +
+        '<td>' + (o.stop_price != null ? fmtMoney(cur, o.stop_price) : '—') + '</td>' +
+        '<td>' + (o.notional != null ? fmtMoney(cur, o.notional) : '—') + '</td>' +
+        '<td style="color:var(--muted)">' + (o.status || '') + '</td>' +
+        '<td style="color:var(--muted)">' + created + '</td>';
+      tb.appendChild(tr);
+    }
+  }
+
+  // Self-hosted SVG bar chart — no third-party CDN, CSP-safe.
+  function renderPnlChart(cur, days) {
+    const host = document.getElementById('pnl-chart-host');
+    if (!host) return;
+    host.innerHTML = '';
+    const data = (days || []).map((d) => ({ label: (d.day || '').slice(5), value: Number(d.realized || 0) }));
+    if (!data.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-family:var(--mono);font-size:0.78rem';
+      empty.textContent = 'No realized P&L sessions yet.';
+      host.appendChild(empty);
+      return;
+    }
+
+    const W = host.clientWidth || 600;
+    const H = host.clientHeight || 220;
+    const PAD_L = 56, PAD_R = 12, PAD_T = 16, PAD_B = 32;
+    const innerW = W - PAD_L - PAD_R;
+    const innerH = H - PAD_T - PAD_B;
+    const maxAbs = Math.max(1e-6, ...data.map((d) => Math.abs(d.value)));
+    const ymax = maxAbs * 1.15;
+    const yToPx = (v) => PAD_T + (1 - (v + ymax) / (2 * ymax)) * innerH;
+    const baselineY = yToPx(0);
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('width', '100%');
+    svg.setAttribute('height', '100%');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Realized P&L by UTC day');
+
+    // Horizontal grid + y-axis labels (5 ticks)
+    for (let i = 0; i <= 4; i++) {
+      const v = ymax - (i * (2 * ymax)) / 4;
+      const y = yToPx(v);
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('x1', PAD_L); line.setAttribute('x2', W - PAD_R);
+      line.setAttribute('y1', y); line.setAttribute('y2', y);
+      line.setAttribute('stroke', 'rgba(255,255,255,0.05)');
+      line.setAttribute('stroke-width', '1');
+      svg.appendChild(line);
+
+      const tx = document.createElementNS(svgNS, 'text');
+      tx.setAttribute('x', PAD_L - 6); tx.setAttribute('y', y + 3);
+      tx.setAttribute('fill', '#7b8a9d');
+      tx.setAttribute('font-family', 'IBM Plex Mono, ui-monospace, monospace');
+      tx.setAttribute('font-size', '10');
+      tx.setAttribute('text-anchor', 'end');
+      tx.textContent = fmtMoney(cur, v);
+      svg.appendChild(tx);
+    }
+
+    // Bars
+    const slot = innerW / data.length;
+    const barW = Math.max(4, Math.min(28, slot * 0.65));
+    data.forEach((d, idx) => {
+      const cx = PAD_L + slot * idx + slot / 2;
+      const x = cx - barW / 2;
+      const y0 = baselineY;
+      const y1 = yToPx(d.value);
+      const y = Math.min(y0, y1);
+      const h = Math.max(1, Math.abs(y1 - y0));
+      const rect = document.createElementNS(svgNS, 'rect');
+      rect.setAttribute('x', x); rect.setAttribute('y', y);
+      rect.setAttribute('width', barW); rect.setAttribute('height', h);
+      rect.setAttribute('rx', '3');
+      rect.setAttribute('fill', d.value >= 0 ? 'rgba(52,211,153,0.85)' : 'rgba(248,113,113,0.9)');
+      const t = document.createElementNS(svgNS, 'title');
+      t.textContent = d.label + ' · ' + fmtMoney(cur, d.value);
+      rect.appendChild(t);
+      svg.appendChild(rect);
+
+      const lab = document.createElementNS(svgNS, 'text');
+      lab.setAttribute('x', cx); lab.setAttribute('y', H - PAD_B + 16);
+      lab.setAttribute('fill', '#7b8a9d');
+      lab.setAttribute('font-family', 'IBM Plex Mono, ui-monospace, monospace');
+      lab.setAttribute('font-size', '10');
+      lab.setAttribute('text-anchor', 'middle');
+      lab.textContent = d.label;
+      svg.appendChild(lab);
+    });
+
+    // Zero baseline emphasis
+    const base = document.createElementNS(svgNS, 'line');
+    base.setAttribute('x1', PAD_L); base.setAttribute('x2', W - PAD_R);
+    base.setAttribute('y1', baselineY); base.setAttribute('y2', baselineY);
+    base.setAttribute('stroke', 'rgba(255,255,255,0.18)');
+    base.setAttribute('stroke-width', '1');
+    svg.appendChild(base);
+
+    host.appendChild(svg);
   }
 
   async function fetchWithTimeout(url, ms) {
@@ -895,6 +1015,17 @@
       : 'Estimated NAV (Supabase ledger)';
     document.getElementById('m-nav').textContent = fmtMoney(cur, navVal || 0);
     let sub = fmtPct(d.nav_change_pct || 0) + ' vs start · ' + fmtMoney(cur, d.starting_nav || 0) + ' baseline';
+    if (taOk) {
+      const ta = d.t212_account || {};
+      if (ta.cash_available != null) {
+        sub += ' · Cash available ' + fmtMoney(cur, ta.cash_available);
+      }
+      if (ta.cash_blocked != null && ta.cash_blocked > 0.005) {
+        sub += ' · Reserved (pending) ' + fmtMoney(cur, ta.cash_blocked);
+      } else if (ta.pending_orders_count) {
+        sub += ' · ' + ta.pending_orders_count + ' pending order' + (ta.pending_orders_count === 1 ? '' : 's');
+      }
+    }
     if (taOk && d.ledger_t212_total_drift != null && Math.abs(d.ledger_t212_total_drift) > 0.005) {
       sub += ' · Ledger drift ' + fmtMoney(cur, d.ledger_t212_total_drift);
     }
@@ -916,6 +1047,7 @@
     document.getElementById('m-mem').textContent = String(d.memories_count != null ? d.memories_count : 0);
 
     renderPositions(cur, d);
+    renderPending(cur, d);
     renderDecisions(d.cycles || []);
     renderThink(d.cycles || []);
     renderTrades(cur, d.trades || []);
