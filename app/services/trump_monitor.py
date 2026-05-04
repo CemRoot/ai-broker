@@ -44,6 +44,18 @@ VISION_PROMPT = (
 )
 
 
+def _mastodon_html_to_plain(raw: str) -> str:
+    """Strip minimal HTML from Mastodon/Truth ``content`` fields."""
+    if not isinstance(raw, str):
+        return ""
+    s = raw.strip()
+    if not s:
+        return ""
+    if s.startswith("<"):
+        s = re.sub(r"<[^>]+>", " ", s)
+    return " ".join(s.split()).strip()
+
+
 def _extract_json_object(text: str) -> dict[str, Any]:
     """Best-effort JSON object extraction from LLM output."""
     text = text.strip()
@@ -320,12 +332,30 @@ class TrumpMonitor:
         return {"fetched": len(data), "new_posts": new_count, "error_status": status}
 
     def _status_plain_text(self, status: dict[str, Any]) -> str:
-        # Prefer spoiler-free content; Mastodon uses HTML sometimes
-        raw = status.get("content") or ""
-        if isinstance(raw, str) and raw.startswith("<"):
-            # Minimal strip tags
-            raw = re.sub(r"<[^>]+>", " ", raw)
-        return " ".join(raw.split())
+        """Plain text for DB + LLM. Boosts/reblogs often have empty top-level ``content``."""
+        main = _mastodon_html_to_plain(str(status.get("content") or ""))
+        reblog = status.get("reblog")
+        rb_dict = reblog if isinstance(reblog, dict) else None
+        rb_text = _mastodon_html_to_plain(str(rb_dict.get("content") or "")) if rb_dict else ""
+
+        if main and rb_text:
+            return f"{main}\n\n↪ {rb_text}"
+        if main:
+            return main
+        if rb_text:
+            return rb_text
+
+        sp = str(status.get("spoiler_text") or "").strip()
+        if sp:
+            return sp
+        if rb_dict:
+            sp2 = str(rb_dict.get("spoiler_text") or "").strip()
+            if sp2:
+                return sp2
+
+        if status.get("media_attachments") or (rb_dict and rb_dict.get("media_attachments")):
+            return "[Media-only post — no status text]"
+        return "[No text in status]"
 
     def _status_created_at(self, status: dict[str, Any]) -> datetime:
         s = status.get("created_at") or ""
