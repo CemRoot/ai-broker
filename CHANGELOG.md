@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`2026-05-04T14:40:00+01:00`:** **Üretim VPS — GitHub `main` senkron + Docker yenileme:** `~/ai-broker` üzerinde `git pull --rebase origin main` (8b7c389→7b416d5) + `docker compose up -d --build --force-recreate ai-broker`; `ollama` servisi yeniden oluşturulmadı (Running/Healthy). Yerel doğrulama: `curl http://127.0.0.1:8000/health` → `status: ok`, `ai-broker-ai-broker-1` healthy.
+
 ### Fixed
 
 - **`2026-05-04T13:10:00+01:00`:** **PaperAgent (T212 backend) duplicate BUY guard:** kullanıcı bildirimi “SPY T212’deyken tekrar almaya çalışıyor olabilir”. Kök neden: BUY akışı `_t212_execute_buy` içinde order basmadan önce aynı ticker için broker tarafı exposure/pending kontrolü yapmıyordu; Supabase mirror poll tabanlı olduğu için (özellikle mobil/web’den dışarıdan order açıldığında) DB henüz güncellenmeden ikinci BUY niyeti oluşabiliyordu. `app/agents/paper_agent.py` yeni `_has_t212_buy_exposure(...)` helper’ı eklendi: **(1)** `get_positions(ticker)` ile açık long var mı, **(2)** `get_all_pending_orders()` içinde aynı ticker için BUY queue var mı (`side=BUY` veya `quantity>0`). Herhangi biri true ise BUY skip + warning log (`existing open position` / `pending BUY already queued`). Böylece T212 “truth” baz alınarak tekrar BUY engelleniyor; mirror gecikmesi duplicate order’a yol açmıyor.
