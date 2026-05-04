@@ -653,8 +653,14 @@ class TrumpMonitor:
                         if isinstance(message, bytes):
                             message = message.decode("utf-8", errors="replace")
                         await self._dispatch_ws_message(message)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
+            # Re-raise so run_with_reconnect's outer except applies exponential
+            # backoff; otherwise a Cloudflare 403 would loop instantly and flood
+            # logs with hundreds of WARNINGs per second.
             log.warning("TrumpMonitor WebSocket failed: %s", exc)
+            raise
 
     async def run_with_reconnect(self) -> None:
         """Long-running loop with exponential backoff + jitter."""

@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-04T03:30:00+03:00`:** **TrumpMonitor log seli (~1.5K WARNING/dk) — `_consume_websocket` 403/exception’ı yutuyordu, `run_with_reconnect` exponential backoff hiç tetiklenmiyor, döngü saniyede yeniden bağlanıyordu.** İçerideki `except` artık `log.warning(...)` sonrası `raise`; dış katman zaten 5s→900s backoff + jitter uyguluyor. Truth Social Cloudflare datacenter IP’lerini (Oracle/Hetzner) sürekli 403 ile kapatıyor — bu artık altyapımızı yormuyor.
+
+### Added
+
+- **`2026-05-04T03:30:00+03:00`:** **`TRUMP_MONITOR_ENABLED` ayarı (default `true`).** `false` yapılınca WebSocket consumer + 60sn in-process REST puller başlamıyor; `POST /internal/trump/pull` endpoint’i ad-hoc / GitHub Actions cron için açık kalıyor. **Datacenter IP’den sürekli Truth WAF 403 alan host’lar (Oracle/Hetzner) için tavsiye edilen değer:** `false`. Cron tarafından yapılan REST denemesi de aynı IP’den geleceği için kalıcı çözüm değil; üretim Trump akışı için **residential IP** veya **resmi paid feed** gerekiyor (CTO notu).
+
+### Fixed
+
 - **`2026-05-04T02:30:00+03:00`:** **Üretim VPS — Telegram webhook + GitHub Actions secrets.** `TELEGRAM_WEBHOOK_URL` / `TELEGRAM_WEBHOOK_SECRET` `.env`’e yazıldı; **`docker compose restart` yeni env’i taşımadığı** için `docker compose up -d --force-recreate ai-broker` ile yenilendi → `/health` **`mode: webhook`**, **`webhook_base_configured: true`**. VPS’te **`INTERNAL_API_KEY` boştu** → güvenli rastgele değer üretildi, aynı değer **`gh secret set AIBROKER_INTERNAL_KEY`** ile GitHub’a verildi; **`AIBROKER_BASE_URL`** = `https://broker.cemkoyluoglu.codes`. **`docs/FAZ4_DEPLOY.md`** — `.env` değişince `--force-recreate` notu.
 
 - **`2026-05-04T02:00:00+03:00`:** **`docs/FAZ4_DEPLOY.md` — Cloudflare Public Hostname tablosunda “Origin configurations: 0” görününce tünel kopuk sanılabiliyor;** açıklama eklendi: dış doğrulama `curl https://…/health` ve Tunnel **Registered connection** log’ları esas alınmalı.

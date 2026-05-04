@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     #: follow @realDonaldTrump or when Cloudflare hiccups silence the stream. Set
     #: to 0 to disable (e.g. when you fully rely on the GitHub Actions cron).
     trump_pull_interval_sec: int = 60
+    #: Master switch for the Trump/Truth Social monitor. Set to ``false`` when
+    #: the host's egress IP is rate-limited / 403'd by Truth Social Cloudflare
+    #: (common on datacenter ranges like Oracle Cloud, Hetzner). Disables both
+    #: the WebSocket consumer and the REST puller; ``POST /internal/trump/pull``
+    #: still works for ad-hoc polling from elsewhere (e.g. GitHub Actions cron).
+    trump_monitor_enabled: bool = True
 
     #: Enrich ``get_macro_context`` with the CNN Fear & Greed Index (free public
     #: endpoint). The single call also yields put/call options and VIX

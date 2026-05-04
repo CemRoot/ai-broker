@@ -197,11 +197,21 @@ async def lifespan(app: FastAPI):
         retriever=retriever,
     )
     trump_monitor.set_paper_agent(paper_agent)
-    trump_task = asyncio.create_task(trump_monitor.run_with_reconnect())
-    log.info("TrumpMonitor background task started")
+    trump_task = None
+    if getattr(settings, "trump_monitor_enabled", True):
+        trump_task = asyncio.create_task(trump_monitor.run_with_reconnect())
+        log.info("TrumpMonitor background task started")
+    else:
+        log.info(
+            "TrumpMonitor disabled (TRUMP_MONITOR_ENABLED=false) — WebSocket + "
+            "in-process REST puller skipped; /internal/trump/pull still available"
+        )
 
     trump_pull_task = None
-    if int(getattr(settings, "trump_pull_interval_sec", 0) or 0) > 0:
+    if (
+        getattr(settings, "trump_monitor_enabled", True)
+        and int(getattr(settings, "trump_pull_interval_sec", 0) or 0) > 0
+    ):
         async def _trump_pull_loop() -> None:
             interval = max(15, int(settings.trump_pull_interval_sec))
             log.info(
@@ -307,11 +317,12 @@ async def lifespan(app: FastAPI):
     # ── SHUTDOWN ────────────────────────────────────────────────────
     log.info("AI Broker shutting down...")
 
-    trump_task.cancel()
-    try:
-        await trump_task
-    except asyncio.CancelledError:
-        log.info("TrumpMonitor task stopped")
+    if trump_task:
+        trump_task.cancel()
+        try:
+            await trump_task
+        except asyncio.CancelledError:
+            log.info("TrumpMonitor task stopped")
 
     if trump_pull_task:
         trump_pull_task.cancel()
