@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     telegram_webhook_url: str = ""  # empty → polling mode (dev)
     telegram_webhook_secret: str = ""  # X-Telegram-Bot-Api-Secret-Token
     telegram_allowed_user_ids: str = ""  # comma-separated int IDs
+    #: Second timezone label for PaperAgent Telegram headers (e.g. ``Europe/Dublin``).
+    #: Empty string = show ET only.
+    telegram_display_secondary_tz: str = "Europe/Dublin"
+    #: When true (and bot + allow-list configured), LLM/PaperAgent failures are pushed to Telegram.
+    telegram_operator_alerts_enabled: bool = True
+    #: Minimum seconds between two alerts sharing the same ``dedupe_key`` (flood control).
+    telegram_operator_alert_cooldown_sec: float = 45.0
 
     # ── Misc ────────────────────────────────────────────────────────
     finnhub_api_key: str = ""

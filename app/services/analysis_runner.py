@@ -13,6 +13,7 @@ from app.core.config import Settings
 from app.core.logging import get_logger
 from app.services.finnhub_news import fetch_company_news
 from app.services.news_pipeline import analyze_news_batch
+from app.services.telegram_operator_alerts import fire_operator_alert, format_exc_brief
 from app.services.t212.ticker_map import t212_to_yfinance
 from app.tools.technical import TechnicalSummary, get_technical_summary
 from app.tools.technical_extended import ExtendedPriceSnapshot, get_extended_price_features
@@ -261,6 +262,12 @@ async def run_symbol_analysis(
             llm_model = resp.model
         except Exception as exc:
             log.warning("Groq analyze failed: %s", exc)
+            await fire_operator_alert(
+                category="LLM · Groq",
+                summary=f"run_symbol_analysis({sym}): Groq failed — trying Ollama.",
+                detail=format_exc_brief(exc),
+                dedupe_key="llm_groq_analyze_path",
+            )
 
     if not llm_text and ollama:
         try:
@@ -269,9 +276,20 @@ async def run_symbol_analysis(
             llm_model = resp.model
         except Exception as exc:
             log.error("Ollama analyze failed: %s", exc)
+            await fire_operator_alert(
+                category="LLM · Ollama",
+                summary=f"run_symbol_analysis({sym}): Ollama failed after Groq miss.",
+                detail=format_exc_brief(exc),
+                dedupe_key="llm_ollama_analyze_path",
+            )
             llm_text = f"⚠️ LLM error: {exc}"
 
     if not llm_text:
+        await fire_operator_alert(
+            category="LLM · Analyze",
+            summary=f"run_symbol_analysis({sym}): no LLM response (Groq/Ollama unavailable).",
+            dedupe_key="llm_analyze_no_output",
+        )
         llm_text = "⚠️ No LLM available."
         llm_model = "none"
 

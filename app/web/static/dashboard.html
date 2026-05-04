@@ -4,35 +4,49 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="AI Broker — live paper trading snapshot: NAV, P&amp;L, agent cycles, and mirrored trades." />
-  <title>AI Broker — Live Finance</title>
+  <title>AI Broker — Live Finance (Beta)</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #070a0d;
-      --surface: #0e1318;
-      --surface2: #151c24;
-      --border: rgba(255, 255, 255, 0.07);
-      --green: #34d399;
+      --bg: #0c1014;
+      --surface: #131a21;
+      --surface2: #1a222c;
+      --surface-elev: #1e2732;
+      --border: rgba(226, 232, 240, 0.06);
+      --border-strong: rgba(226, 232, 240, 0.1);
+      --green: #4ade80;
+      --green-dim: rgba(74, 222, 128, 0.14);
       --red: #f87171;
-      --amber: #fbbf24;
-      --blue: #60a5fa;
+      --red-dim: rgba(248, 113, 113, 0.12);
+      --amber: #e2b84c;
+      --amber-dim: rgba(226, 184, 76, 0.1);
+      --blue: #7eb6ff;
       --violet: #a78bfa;
-      --text: #e8edf4;
-      --muted: #7b8a9d;
+      --text: #e8edf3;
+      --text-dim: #c5ced9;
+      --muted: #8b97a8;
       --mono: "IBM Plex Mono", ui-monospace, monospace;
       --sans: "Instrument Sans", system-ui, sans-serif;
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .dot { animation: none !important; }
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: radial-gradient(1200px 600px at 10% -10%, rgba(96, 165, 250, 0.08), transparent),
-        radial-gradient(900px 500px at 90% 0%, rgba(167, 139, 250, 0.06), transparent),
+      background:
+        radial-gradient(1000px 480px at 12% -8%, rgba(126, 182, 255, 0.04), transparent),
+        radial-gradient(800px 400px at 88% 4%, rgba(167, 139, 250, 0.03), transparent),
         var(--bg);
       color: var(--text);
       font-family: var(--sans);
       min-height: 100vh;
-      line-height: 1.45;
+      line-height: 1.5;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
     }
     a { color: var(--blue); }
     .skip {
@@ -55,14 +69,14 @@
     }
     header {
       border-bottom: 1px solid var(--border);
-      padding: 1rem clamp(1rem, 4vw, 2rem);
+      padding: 0.85rem clamp(1rem, 4vw, 1.75rem);
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
-      background: rgba(14, 19, 24, 0.85);
-      backdrop-filter: blur(10px);
+      background: rgba(19, 26, 33, 0.92);
+      backdrop-filter: blur(12px);
       position: sticky;
       top: 0;
       z-index: 10;
@@ -75,14 +89,37 @@
     .mark {
       width: 2.25rem;
       height: 2.25rem;
-      border-radius: 10px;
-      background: linear-gradient(135deg, var(--green), #059669);
+      border-radius: var(--radius-sm);
+      background: linear-gradient(145deg, #2d3d4a, #1a242d);
+      border: 1px solid var(--border-strong);
       display: grid;
       place-items: center;
       font-family: var(--mono);
       font-weight: 600;
-      font-size: 0.7rem;
-      color: #022c22;
+      font-size: 0.68rem;
+      color: var(--text-dim);
+    }
+    .brand-title-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .beta-badge {
+      font-family: var(--mono);
+      font-size: 0.52rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #f0d78a;
+      background: rgba(226, 184, 76, 0.12);
+      border: 1px solid rgba(226, 184, 76, 0.28);
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      line-height: 1;
+      vertical-align: middle;
+      text-decoration: none;
+      cursor: help;
     }
     .brand h1 {
       font-size: 1.05rem;
@@ -103,15 +140,16 @@
       color: var(--muted);
     }
     .dot {
-      width: 7px;
-      height: 7px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: var(--green);
-      animation: pulse 2.2s ease-in-out infinite;
+      box-shadow: 0 0 0 2px var(--green-dim);
+      animation: pulse 3s ease-in-out infinite;
     }
     @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.45; transform: scale(0.92); }
+      0%, 100% { opacity: 0.85; }
+      50% { opacity: 0.35; }
     }
     main {
       max-width: 1280px;
@@ -141,7 +179,7 @@
       gap: 1px;
       background: var(--border);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: var(--radius);
       overflow: hidden;
       margin-bottom: 1.25rem;
     }
@@ -185,7 +223,7 @@
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: var(--radius);
       overflow: hidden;
     }
     .card-h {
@@ -234,9 +272,9 @@
       border-radius: 4px;
       letter-spacing: 0.04em;
     }
-    .pill-buy { background: rgba(52, 211, 153, 0.15); color: var(--green); }
-    .pill-sell { background: rgba(248, 113, 113, 0.15); color: var(--red); }
-    .pill-hold, .pill-skip { background: rgba(123, 138, 157, 0.18); color: var(--muted); }
+    .pill-buy { background: var(--green-dim); color: #86efac; }
+    .pill-sell { background: var(--red-dim); color: #fca5a5; }
+    .pill-hold, .pill-skip { background: rgba(123, 138, 157, 0.12); color: var(--muted); }
     .sym { font-family: var(--mono); font-weight: 600; font-size: 0.85rem; }
     .why { font-size: 0.78rem; color: var(--muted); }
     .bar {
@@ -260,7 +298,7 @@
       margin-top: 0.6rem;
       padding: 1rem;
       background: var(--surface2);
-      border-radius: 8px;
+      border-radius: var(--radius-sm);
       font-family: var(--mono);
       font-size: 0.72rem;
       white-space: pre-wrap;
@@ -268,7 +306,7 @@
       max-height: 280px;
       overflow-y: auto;
       border: 1px solid var(--border);
-      color: #cbd5e1;
+      color: var(--text-dim);
     }
     table {
       width: 100%;
@@ -278,20 +316,21 @@
     }
     th {
       text-align: left;
-      font-weight: 400;
+      font-weight: 500;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-size: 0.58rem;
+      letter-spacing: 0.05em;
+      font-size: 0.6rem;
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.15);
+    }
+    td {
       padding: 0.65rem 1rem;
       border-bottom: 1px solid var(--border);
     }
-    td {
-      padding: 0.7rem 1rem;
-      border-bottom: 1px solid var(--border);
-    }
     tr:last-child td { border-bottom: none; }
-    tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
+    tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
     footer {
       text-align: center;
       font-family: var(--mono);
@@ -313,43 +352,146 @@
       50% { opacity: 0.85; }
     }
     .banner-err {
-      background: rgba(248, 113, 113, 0.12);
-      border: 1px solid rgba(248, 113, 113, 0.35);
-      color: #fecaca;
-      padding: 1rem 1.25rem;
-      border-radius: 10px;
+      background: var(--red-dim);
+      border: 1px solid rgba(248, 113, 113, 0.22);
+      color: #fecdd3;
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius-sm);
       margin-bottom: 1rem;
-      font-size: 0.85rem;
+      font-size: 0.8125rem;
+      border-left: 3px solid rgba(248, 113, 113, 0.55);
     }
-    .dyor-notice {
-      background: rgba(127, 29, 29, 0.45);
-      border: 1px solid rgba(248, 113, 113, 0.55);
-      color: #fecaca;
-      padding: 0.9rem 1.1rem;
-      border-radius: 10px;
+    /* Single professional disclosure — calm, legible */
+    .compliance-band {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
       margin-bottom: 1rem;
-      font-size: 0.78rem;
+      overflow: hidden;
+    }
+    .compliance-band__top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 0.75rem 1.25rem;
+      padding: 0.85rem 1.1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .compliance-band__tag {
+      font-family: var(--mono);
+      font-size: 0.58rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .compliance-band__lede {
+      flex: 1;
+      min-width: min(100%, 220px);
+      font-size: 0.8125rem;
+      color: var(--text-dim);
       line-height: 1.55;
     }
-    .dyor-notice strong {
-      display: block;
-      font-size: 0.72rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: #fca5a5;
-      margin-bottom: 0.35rem;
-      font-family: var(--mono);
+    .compliance-band details {
+      border: none;
     }
-    .data-strip {
-      background: rgba(251, 191, 36, 0.06);
-      border: 1px solid rgba(251, 191, 36, 0.22);
-      color: #fcd34d;
-      padding: 0.65rem 1rem;
-      border-radius: 8px;
-      margin-bottom: 1.1rem;
-      font-size: 0.72rem;
-      line-height: 1.5;
+    .compliance-band summary {
       font-family: var(--mono);
+      font-size: 0.65rem;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0.55rem 1.1rem;
+      list-style: none;
+      user-select: none;
+      background: rgba(0, 0, 0, 0.08);
+    }
+    .compliance-band summary::-webkit-details-marker { display: none; }
+    .compliance-band summary::before {
+      content: "▸ ";
+      display: inline-block;
+      transition: transform 0.15s ease;
+      color: var(--muted);
+    }
+    .compliance-band details[open] summary::before { transform: rotate(90deg); }
+    .compliance-band summary:hover { color: var(--text-dim); }
+    .compliance-body {
+      padding: 0.85rem 1.1rem 1rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.6;
+      border-top: 1px solid var(--border);
+      background: var(--surface2);
+    }
+    .compliance-body p + p { margin-top: 0.65rem; }
+    .compliance-body .sep {
+      display: block;
+      height: 1px;
+      background: var(--border);
+      margin: 0.65rem 0;
+    }
+    /* Live data context — no alarm colors */
+    .feed-line {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      line-height: 1.55;
+      color: var(--muted);
+      padding: 0.7rem 1rem;
+      margin-bottom: 1rem;
+      border-radius: var(--radius-sm);
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border);
+    }
+    .session-bar {
+      padding: 0.65rem 1rem;
+      margin-bottom: 1rem;
+      border-radius: var(--radius-sm);
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      line-height: 1.5;
+      border: 1px solid var(--border);
+    }
+    .session-bar--open {
+      color: var(--text-dim);
+      background: var(--green-dim);
+      border-color: rgba(74, 222, 128, 0.2);
+      border-left: 3px solid rgba(74, 222, 128, 0.65);
+    }
+    .session-bar--closed {
+      color: var(--text-dim);
+      background: var(--amber-dim);
+      border-color: rgba(226, 184, 76, 0.15);
+      border-left: 3px solid rgba(226, 184, 76, 0.45);
+    }
+    .card-help {
+      margin: 0.5rem 0.85rem 0.65rem;
+      padding: 0.55rem 0.65rem;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      line-height: 1.45;
+      color: var(--muted);
+      background: rgba(0, 0, 0, 0.12);
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+    }
+    .badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      font-weight: 600;
+      padding: 0.08rem 0.4rem;
+      border-radius: 4px;
+      vertical-align: middle;
+    }
+    .badge--stale {
+      background: var(--amber-dim);
+      color: var(--amber);
+      border: 1px solid rgba(226, 184, 76, 0.2);
     }
   </style>
 </head>
@@ -359,7 +501,10 @@
     <div class="brand">
       <div class="mark">AI</div>
       <div>
-        <h1>AI Broker</h1>
+        <div class="brand-title-row">
+          <h1>AI Broker</h1>
+          <abbr class="beta-badge" title="Beta: dashboard and data integrations may change; verify all figures in your broker.">Beta</abbr>
+        </div>
         <p>Paper execution · live read-only</p>
       </div>
     </div>
@@ -372,18 +517,26 @@
   <main id="main">
     <div id="err-box" class="banner-err" hidden></div>
 
-    <div id="session-banner" class="data-strip" aria-live="polite" hidden style="margin-bottom:1rem"></div>
+    <div id="session-banner" class="session-bar" aria-live="polite" hidden></div>
 
-    <div class="dyor-notice" role="note">
-      <strong>Do your own research (DYOR)</strong>
-      Bu panel yatırım tavsiyesi değildir; buradaki rakamlar garanti veya “beklenen getiri” anlamına gelmez. Trading 212 veya başka bir aracı kurumun resmi ekranı yerine geçmez.
-      <br /><br />
-      <span lang="en">Not financial advice. Figures are informational only, may lag, and can differ from your broker app during sync or pending orders. Always verify in Trading 212 (or your venue) before acting.</span>
-    </div>
+    <section class="compliance-band" aria-label="Disclaimer and data scope">
+      <div class="compliance-band__top">
+        <span class="compliance-band__tag">Not advice</span>
+        <p class="compliance-band__lede">
+          Read-only snapshot for research. Figures may lag or differ from your broker during sync or pending orders. Always confirm in Trading&nbsp;212 (or your venue) before acting.
+        </p>
+      </div>
+      <details>
+        <summary>Full disclaimer · TR / EN</summary>
+        <div class="compliance-body" role="note">
+          <p lang="tr"><strong style="color:var(--text-dim)">Araştırmanızı siz yapın (DYOR).</strong> Bu panel yatırım tavsiyesi değildir; buradaki rakamlar garanti veya “beklenen getiri” anlamına gelmez. Trading&nbsp;212 veya başka bir aracı kurumun resmi ekranı yerine geçmez.</p>
+          <span class="sep" aria-hidden="true"></span>
+          <p lang="en"><strong style="color:var(--text-dim)">Not financial advice.</strong> Informational only; not a substitute for your broker’s official statements or order book.</p>
+        </div>
+      </details>
+    </section>
 
-    <p class="data-strip" id="data-strip" aria-live="polite">
-      Veri kaynakları yükleniyor…
-    </p>
+    <p class="feed-line" id="data-strip" aria-live="polite">Veri kaynakları yükleniyor…</p>
 
     <div class="status" id="status" aria-live="polite">
       <span><strong>System</strong> <span id="st-sys" class="skel"> </span></span>
@@ -445,8 +598,8 @@
         <span>Pending orders <span id="pending-count" style="color:var(--muted);font-weight:400">·</span></span>
         <span id="pending-src" style="color:var(--muted)">Trading 212 · GET /equity/orders</span>
       </div>
-      <p class="data-strip" style="margin:0.5rem 0.75rem 0;font-size:0.7rem">
-        Live orders sitting in the broker queue (limit/stop awaiting trigger, or market orders queued outside RTH). Notional is reserved from cash and reduces <em>cash_available</em>; it stays inside <em>total value</em> until the fill happens.
+      <p class="card-help">
+        Live orders in the broker queue (limit/stop awaiting trigger, or market orders outside RTH). Notional is reserved from cash (<em>cash_available</em>) and remains in <em>total value</em> until filled.
       </p>
       <div style="overflow-x:auto">
         <table>
@@ -484,8 +637,8 @@
           <span>Latest decisions</span>
           <span id="dec-meta">PaperAgent cycle</span>
         </div>
-        <p class="data-strip" style="margin:0.5rem 0.75rem 0;font-size:0.7rem">
-          Decisions are model proposals. The executor enforces ≤8% stop, R/R ≥ 2, ~20% NAV cap and active-punishment skips — proposals failing these are dropped. See the audit table below for actual fills.
+        <p class="card-help">
+          Model proposals only. Executor applies ≤8% stop, R/R ≥ 2, ~20% NAV cap, and active-punishment skips — rejected proposals do not appear as fills. Use the audit table below for executed trades.
         </p>
         <div class="log" id="decisions"></div>
       </div>
@@ -528,8 +681,8 @@
   </main>
 
   <footer>
-    Paper / demo context — not investment advice. Open positions and total value use the Trading 212 Public API on each refresh when <code>PAPER_EXECUTION_BACKEND=t212</code>; otherwise the Supabase ledger estimate is shown. Pending orders reflect <code>GET /equity/orders</code> on T212 (cached up to 60s). Trade rows are the Supabase audit mirror and can lag behind fills.<br />
-    Refreshes automatically · self-hosted SVG chart · <span id="ft-ver"></span>
+    Paper / demo context. When <code>PAPER_EXECUTION_BACKEND=t212</code>, positions and NAV refresh from the Trading 212 Public API; otherwise values follow the Supabase ledger. Pending orders: <code>GET /equity/orders</code> (≤60s cache). Trade log: Supabase mirror — may trail broker fills.<br />
+    Auto-refresh · inline SVG chart · <span id="ft-ver"></span>
   </footer>
 
   <script>
@@ -592,7 +745,7 @@
     const h = ageHours(iso);
     if (h == null || h < (thresholdH || 6)) return '';
     const lab = h >= 24 ? Math.round(h / 24) + 'd' : Math.round(h) + 'h';
-    return ' <span style="background:rgba(251,191,36,0.18);color:var(--amber);padding:0.05rem 0.4rem;border-radius:4px;font-family:var(--mono);font-size:0.65rem">STALE · ' + lab + ' old</span>';
+    return ' <span class="badge badge--stale">STALE · ' + lab + ' old</span>';
   }
 
   function renderDecisions(cycles) {
@@ -672,7 +825,7 @@
   function setSessionBanner(d) {
     const el = document.getElementById('session-banner');
     const ms = d.market_session;
-    if (!ms) { el.hidden = true; return; }
+    if (!ms) { el.hidden = true; el.className = 'session-bar'; return; }
     const cycles = (d.cycles || []);
     const lastCycleAt = cycles.length ? cycles[0].created_at : null;
     let lastCycleNote = '';
@@ -686,19 +839,21 @@
     }
     if (ms.is_open) {
       el.hidden = false;
-      el.style.color = 'var(--green)';
+      el.className = 'session-bar session-bar--open';
       const closeTxt = ms.next_close_et ? ms.next_close_et.replace('T', ' ').slice(0, 16) : '—';
-      el.textContent = '🟢 NYSE open · next close ~' + closeTxt + ' ET. PaperAgent runs at OPEN (09:30) / MIDDAY (12:00) / CLOSE (15:45) ET.' + lastCycleNote;
+      el.textContent =
+        'NYSE · Regular session open · Next close ~' + closeTxt + ' ET. PaperAgent schedule: OPEN 09:30 / MIDDAY 12:00 / CLOSE 15:45 ET.' + lastCycleNote;
     } else {
       el.hidden = false;
-      el.style.color = 'var(--amber)';
+      el.className = 'session-bar session-bar--closed';
       const openTxt = ms.next_open_et ? ms.next_open_et.replace('T', ' ').slice(0, 16) : '—';
       let inTxt = '';
       try {
         const inMs = new Date(ms.next_open_et).getTime() - Date.now();
         if (inMs > 0) inTxt = ' (in ' + fmtRel(inMs) + ')';
       } catch (_) { /* ignore */ }
-      el.textContent = '🟡 NYSE closed · next open ' + openTxt + ' ET' + inTxt + '. New decisions and trades resume at the next OPEN.' + lastCycleNote;
+      el.textContent =
+        'NYSE · Session closed · Next open ' + openTxt + ' ET' + inTxt + '. Decisions and new trades typically resume at the next regular open.' + lastCycleNote;
     }
   }
 
@@ -894,7 +1049,7 @@
       rect.setAttribute('x', x); rect.setAttribute('y', y);
       rect.setAttribute('width', barW); rect.setAttribute('height', h);
       rect.setAttribute('rx', '3');
-      rect.setAttribute('fill', d.value >= 0 ? 'rgba(52,211,153,0.85)' : 'rgba(248,113,113,0.9)');
+      rect.setAttribute('fill', d.value >= 0 ? 'rgba(74,222,128,0.72)' : 'rgba(248,113,113,0.65)');
       const t = document.createElementNS(svgNS, 'title');
       t.textContent = d.label + ' · ' + fmtMoney(cur, d.value);
       rect.appendChild(t);

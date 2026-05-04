@@ -31,6 +31,7 @@ from app.services.paper.account_currency import resolve_paper_account_currency
 from app.services.paper.broker import PaperBroker
 from app.services.paper.models import PaperTrade
 from app.services.paper.t212_pending_mirror_store import enqueue_t212_pending_mirror
+from app.services.telegram_operator_alerts import fire_operator_alert, format_exc_brief
 from app.services.t212.client import T212Client
 from app.services.t212.ticker_map import yfinance_to_t212
 from app.tools.definitions import TOOLS
@@ -44,6 +45,45 @@ log = get_logger("paper_agent")
 ET = ZoneInfo("America/New_York")
 
 
+def _paper_agent_clock_block(settings: Settings) -> str:
+    """Human-readable ET clock plus optional secondary zone (Telegram UX)."""
+    now_et = datetime.now(tz=ET)
+    et_line = now_et.strftime("%Y-%m-%d %H:%M ET")
+    sec = (getattr(settings, "telegram_display_secondary_tz", None) or "").strip()
+    if not sec:
+        return (
+            f"{et_line}\n"
+            "(NYSE schedule uses US/Eastern; the Telegram bubble timestamp is your device local time.)"
+        )
+    try:
+        zi = ZoneInfo(sec)
+        loc = datetime.now(tz=zi)
+        sub = sec.split("/")[-1].replace("_", " ")
+        return (
+            f"{et_line} · {loc.strftime('%Y-%m-%d %H:%M')} ({sub})\n"
+            "(Anchors OPEN/MIDDAY/CLOSE are US/Eastern; Telegram bubble time follows your phone.)"
+        )
+    except Exception:
+        return f"{et_line}\n(TELEGRAM_DISPLAY_SECONDARY_TZ={sec!r} is invalid — showing ET only.)"
+
+
+def _paper_agent_clock_header(settings: Settings, *, with_seconds: bool = False) -> str:
+    """One-line clock for Telegram headers (ET + optional secondary)."""
+    now_et = datetime.now(tz=ET)
+    fmt = "%H:%M:%S ET" if with_seconds else "%H:%M ET"
+    et_part = now_et.strftime(fmt)
+    sec = (getattr(settings, "telegram_display_secondary_tz", None) or "").strip()
+    if not sec:
+        return et_part
+    try:
+        loc = datetime.now(tz=ZoneInfo(sec))
+        lfmt = "%H:%M:%S" if with_seconds else "%H:%M"
+        zn = loc.tzname() or ""
+        return f"{et_part} · {loc.strftime(lfmt)} {zn}".strip()
+    except Exception:
+        return et_part
+
+
 def build_paper_system_prompt(account_currency: str) -> str:
     ac = (account_currency or "USD").upper()[:3]
     return f"""You are an autonomous paper trading agent (Alpha Arena-style discipline) managing a paper portfolio.
@@ -51,7 +91,13 @@ Account base currency is **{ac}** (NAV, cash, and broker balances are in {ac}).
 US-listed stock prices from tools are usually in **USD**; the broker converts at execution — use tool prices as quoted; do not assume they are {ac} unless the tool says so.
 
 Use tools for facts; never invent prices, indicator values, or news.
-Available tools: get_macro_context, get_portfolio, screen_stocks, get_technical, get_news, get_memories.
+Available tools: get_macro_context, get_portfolio, screen_stocks, get_technical, get_news, get_memories,
+check_t212_equity_instrument (when ``PAPER_EXECUTION_BACKEND=t212`` — verify the symbol exists as a **STOCK/ETF** on this Trading 212 account before any BUY).
+
+**Macro vs tradable symbols:** SPY, QQQ, VIX are **benchmarks** for regime commentary only.
+Do **not** put SPY/QQQ/^VIX in the JSON decisions array unless they are confirmed **T212 equity invest** names
+(use ``check_t212_equity_instrument``). If you have no equity BUY edge, return **no row** for pure index context
+(or a single portfolio-level SKIP) instead of repetitive ``SPY HOLD``.
 Market data may be supplied to you in TOON (Token-Oriented Object Notation): a tabular,
 JSON-equivalent format where the first row defines columns (e.g. ``per_ticker[3]{{ticker,technical,news,memories}}:``)
 followed by one row per record. Treat it as the authoritative ground truth.
@@ -60,7 +106,7 @@ followed by one row per record. Treat it as the authoritative ground truth.
 ANALYSIS FRAMEWORK (think through the SIX sections in order, in your chain-of-thought)
 ────────────────────────────────────────────────────────────────────────
 0) **CONTEXT SNAPSHOT (Risk Regime)**
-   - From get_macro_context: VIX level + regime label (Low-vol / Normal / High-vol), index trend (SPY/QQQ above or below 50/200 SMA), VIX direction.
+   - From get_macro_context: VIX level + regime label (Low-vol / Normal / High-vol), index trend (benchmark ETFs such as SPY/QQQ vs 50/200 SMA — **macro only**, not default trade tickers), VIX direction.
    - News pulse: are there fresh macro catalysts (CPI / FOMC / NFP / earnings) in the next 1–5 days? state risk regime as RISK-ON / RISK-OFF / EVENT-WINDOW.
 
 1) **RAW DATA DASHBOARD (per ticker on the watchlist)**
@@ -269,7 +315,6 @@ class PaperAgent:
 
     async def run_cycle(self, event_type: str, *, allow_trades: bool = True) -> tuple[str, list[dict[str, Any]]]:
         self._reset_emergency_count_if_new_et_day()
-        now_et = datetime.now(tz=ET).strftime("%Y-%m-%d %H:%M ET")
         acct_cur = await self._resolve_account_currency()
         punish_block = await self._active_punishments_prompt_block()
         risk_para, halt_buys = await self._portfolio_risk_lines(account_currency=acct_cur)
@@ -281,10 +326,18 @@ class PaperAgent:
         except Exception:
             macro_snip = ""
         macro_block = f"MACRO (from tools):\n{macro_snip}\n\n" if macro_snip else ""
+        clock_block = _paper_agent_clock_block(self.deps.settings)
+        sched_note = ""
+        if event_type in ("PREMARKET", "TICK"):
+            sched_note = (
+                "NOTE: Broker orders fire only on OPEN / MIDDAY / CLOSE (regular session, ET). "
+                "This event is preparatory or between-anchor ticks — decisions here do not place tickets.\n\n"
+            )
         user_message = f"""Market Event: {event_type}
-Current Time: {now_et}
+Current Time:
+{clock_block}
 
-{risk_para}
+{sched_note}{risk_para}
 
 {macro_block}{punish_block}
 Analyze the market and make your trading decisions.
@@ -402,6 +455,12 @@ Use tools to gather data. Follow the trading rules.
                 raise
             except Exception as exc:
                 log.error("PaperAgent cycle error: %s", exc)
+                await fire_operator_alert(
+                    category="PaperAgent",
+                    summary=f"run_forever: cycle crashed — {type(exc).__name__}",
+                    detail=format_exc_brief(exc),
+                    dedupe_key=f"paper_agent_loop:{type(exc).__name__}",
+                )
                 await asyncio.sleep(60)
 
     async def run_emergency_cycle(self, *, trigger: str, context: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
@@ -618,6 +677,11 @@ Return JSON decisions array.
             if halt_new_buys:
                 log.warning("Skipping BUY %s: max drawdown halt active", ticker)
                 return None
+            if self.deps.settings.paper_executes_on_t212 and self.deps.t212:
+                ok_sym, why = await self.deps.t212.is_us_equity_instrument_tradeable(ticker)
+                if not ok_sym:
+                    log.warning("Skipping BUY %s: %s", ticker, why)
+                    return None
             # Mathematical guard: enforce stop within 8% AND reward/risk ≥ 2.0.
             # The system prompt asks the LLM to honor these; the executor enforces.
             if stop_loss_f is None or target_f is None:
@@ -1145,7 +1209,7 @@ Return JSON decisions array.
         footer_bits: list[str] = ["🤖 PaperAgent"]
         if cycle_event:
             footer_bits.append(cycle_event[:20])
-        footer_bits.append(datetime.now(tz=ET).strftime("%H:%M ET"))
+        footer_bits.append(_paper_agent_clock_header(self.deps.settings, with_seconds=False))
         if order_id is not None:
             footer_bits.append(f"#T212-{order_id}")
         footer = " | ".join(footer_bits)
@@ -1317,7 +1381,17 @@ Return JSON decisions array.
         )
 
         t0 = time.perf_counter()
-        resp = await self.deps.ollama.analyze(enriched, system=system_prompt)
+        try:
+            resp = await self.deps.ollama.analyze(enriched, system=system_prompt)
+        except Exception as exc:
+            log.error("Local-prepass Ollama failed: %s", exc)
+            await fire_operator_alert(
+                category="PaperAgent · Ollama",
+                summary="Local prepass: Ollama analyze failed (PREFER_LOCAL_LLM path).",
+                detail=format_exc_brief(exc),
+                dedupe_key="paper_agent_local_prepass_ollama",
+            )
+            raise
         elapsed = time.perf_counter() - t0
         log.info("Local-prepass Ollama OK (%.1fs, model=%s)", elapsed, resp.model)
         reasoning, decisions = _extract_json_array(resp.text)
@@ -1370,10 +1444,34 @@ Return JSON decisions array.
         if not allowed:
             return
 
+        # B1: premarket / between-anchor ticks — no trades; keep Telegram concise.
+        if not is_emergency and event_type in ("PREMARKET", "TICK"):
+            clk = _paper_agent_clock_header(self.deps.settings, with_seconds=False)
+            parts = [
+                f"🤖 AI BROKER | {event_type} | {clk}",
+                "⏸ Pre-market / between-event — no broker orders (OPEN / MIDDAY / CLOSE ET only).",
+                "Full cycle → Supabase daily_reports · `/paper log`.",
+            ]
+            if decisions:
+                parts.append("Snapshot (max 3):")
+                for d in decisions[:3]:
+                    t = str(d.get("ticker", "")).upper().strip()
+                    a = str(d.get("action", "")).upper().strip()
+                    parts.append(f"• {t} | {a}")
+            else:
+                parts.append("(No decision rows.)")
+            msg = "\n".join(parts)
+            for uid in allowed:
+                try:
+                    await app.bot.send_message(chat_id=uid, text=msg)
+                except Exception:
+                    pass
+            return
+
         # Keep feed compact.
-        head = f"🤖 AI BROKER | {event_type} | {datetime.now(tz=ET).strftime('%H:%M')} ET"
+        head = f"🤖 AI BROKER | {event_type} | {_paper_agent_clock_header(self.deps.settings, with_seconds=False)}"
         if is_emergency:
-            head = f"🚨 ACİL | {event_type} | {datetime.now(tz=ET).strftime('%H:%M:%S')} ET"
+            head = f"🚨 ACİL | {event_type} | {_paper_agent_clock_header(self.deps.settings, with_seconds=True)}"
             extra: list[str] = []
             ctx = emergency_context or {}
             score = ctx.get("impact_score")

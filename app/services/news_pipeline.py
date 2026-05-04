@@ -16,6 +16,7 @@ from typing import Any
 from app.core.logging import get_logger
 from app.services.llm.groq_service import GroqService
 from app.services.llm.ollama_service import OllamaService
+from app.services.telegram_operator_alerts import fire_operator_alert, format_exc_brief
 
 log = get_logger("news_pipeline")
 
@@ -247,6 +248,12 @@ async def analyze_news_batch(
                 model_used = resp.model
             except Exception as exc:
                 log.warning("Groq news batch failed: %s", exc)
+                await fire_operator_alert(
+                    category="LLM · Groq",
+                    summary=f"analyze_news_batch({sym}): Groq failed — trying Ollama.",
+                    detail=format_exc_brief(exc),
+                    dedupe_key="llm_groq_news_batch",
+                )
 
         if not text_out and ollama:
             try:
@@ -255,9 +262,20 @@ async def analyze_news_batch(
                 model_used = resp.model
             except Exception as exc:
                 log.error("Ollama news batch failed: %s", exc)
+                await fire_operator_alert(
+                    category="LLM · Ollama",
+                    summary=f"analyze_news_batch({sym}): Ollama failed after Groq miss.",
+                    detail=format_exc_brief(exc),
+                    dedupe_key="llm_ollama_news_batch",
+                )
                 raise RuntimeError(f"News batch LLM failed: {exc}") from exc
 
         if not text_out:
+            await fire_operator_alert(
+                category="LLM · News",
+                summary=f"analyze_news_batch({sym}): no LLM output (Groq off/failed and no Ollama).",
+                dedupe_key="llm_news_no_output",
+            )
             raise RuntimeError("No LLM available for news batch (Groq disabled and Ollama failed)")
 
         scores = parse_layer1_response(text_out, len(chunk))

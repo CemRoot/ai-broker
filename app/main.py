@@ -39,6 +39,7 @@ from app.tools.executor import ToolDeps, ToolExecutor
 from app.agents.paper_agent import PaperAgent, PaperAgentDeps
 from app.agents.punishment import PunishmentEngine
 from app.agents.position_monitor import PositionMonitor
+from app.services.telegram_operator_alerts import configure_operator_alerts
 
 log = get_logger("main")
 
@@ -74,6 +75,17 @@ async def lifespan(app: FastAPI):
     )
     t212 = T212Client(http_client, settings)
     log.info("T212 client ready — base=%s", settings.t212_api_url)
+    if settings.paper_executes_on_t212 and (
+        (settings.t212_demo_api_key or "").strip() and (settings.t212_demo_api_secret or "").strip()
+    ):
+        try:
+            await t212.fetch_equity_instruments_list()
+            log.info(
+                "T212 equity instruments cache primed (%d tradeable STOCK/ETF)",
+                t212.tradeable_equity_instrument_count(),
+            )
+        except Exception as exc:
+            log.warning("T212 instruments cache prime failed (BUYs will refresh on demand): %s", exc)
 
     # ── LLM services ────────────────────────────────────────────────
     groq_svc = GroqService(settings) if settings.groq_api_key else None
@@ -155,6 +167,8 @@ async def lifespan(app: FastAPI):
             log.info("Telegram polling started (dev mode)")
     else:
         log.warning("TELEGRAM_BOT_TOKEN empty — bot disabled")
+
+    configure_operator_alerts(bot_app, settings)
 
     # ── Faz 3: Paper Agent (event loop) ──────────────────────────────
     paper_agent = PaperAgent(

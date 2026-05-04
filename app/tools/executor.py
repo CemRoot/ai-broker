@@ -84,6 +84,10 @@ class ToolExecutor:
                 return await self._screen_stocks(
                     min_volume_ratio=float(args.get("min_volume_ratio", 1.5) or 1.5)
                 )
+            if name == "check_t212_equity_instrument":
+                return await self._check_t212_equity_instrument(
+                    ticker=str(args.get("ticker", "") or "").strip(),
+                )
 
             return f"ERROR: Unknown tool '{name}'."
         except Exception as exc:
@@ -434,6 +438,25 @@ class ToolExecutor:
                 f"- [{when}] Impact {imp}/10 {sent} | Tickers: {tick_s or 'n/a'} | \"{txt}\""
             )
         return out
+
+    async def _check_t212_equity_instrument(self, ticker: str) -> str:
+        if not ticker:
+            return "ERROR: ticker is required."
+        if not self.deps.settings.paper_executes_on_t212:
+            return (
+                "T212 EQUITY CHECK: skipped (PAPER_EXECUTION_BACKEND is not t212 — "
+                "virtual ledger mode has no broker instrument list)."
+            )
+        if not self.deps.t212:
+            return "T212 EQUITY CHECK: ERROR: T212 client not configured."
+        try:
+            ok, detail = await self.deps.t212.is_us_equity_instrument_tradeable(ticker)
+        except Exception as exc:
+            return f"T212 EQUITY CHECK {ticker.upper()}: ERROR: {type(exc).__name__}: {exc}"
+        sym = ticker.upper().strip()
+        if ok:
+            return f"T212 EQUITY CHECK {sym}: OK — tradeable as {detail} (STOCK/ETF on this account)."
+        return f"T212 EQUITY CHECK {sym}: NO — {detail}"
 
     async def _screen_stocks(self, min_volume_ratio: float = 1.5) -> str:
         if not self.deps.screener:

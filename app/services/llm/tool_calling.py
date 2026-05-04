@@ -21,6 +21,7 @@ from typing import Any
 from app.core.logging import get_logger
 from app.services.llm.groq_service import GroqService, LLMResponse
 from app.services.llm.ollama_service import OllamaService
+from app.services.telegram_operator_alerts import fire_operator_alert, format_exc_brief
 from app.tools.executor import ToolExecutor
 
 log = get_logger("llm.tool_calling")
@@ -131,6 +132,7 @@ async def analyze_with_tools(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": user_message})
 
+    groq_failed = False
     # ── Groq primary ────────────────────────────────────────────────
     if groq:
         t0 = time.perf_counter()
@@ -184,14 +186,31 @@ async def analyze_with_tools(
                 iterations=max_iterations,
             )
         except Exception as exc:
+            groq_failed = True
             log.warning("Groq analyze_with_tools failed; falling back to Ollama: %s", exc)
+            await fire_operator_alert(
+                category="LLM · Groq",
+                summary="analyze_with_tools: Groq failed — falling back to Ollama (no tool-calling on fallback path).",
+                detail=format_exc_brief(exc),
+                dedupe_key="llm_groq_tool_fail",
+            )
 
     # ── Ollama fallback (no tool calling in this repo yet) ──────────
     if ollama:
         prompt = user_message
         # Put system prompt on top to preserve instruction ordering.
         system = system_prompt or None
-        resp: LLMResponse = await ollama.analyze(prompt, system=system)
+        try:
+            resp: LLMResponse = await ollama.analyze(prompt, system=system)
+        except Exception as exc:
+            log.error("Ollama analyze_with_tools fallback failed: %s", exc)
+            await fire_operator_alert(
+                category="LLM · Ollama",
+                summary="analyze_with_tools: Ollama failed (after Groq error or Groq disabled).",
+                detail=format_exc_brief(exc),
+                dedupe_key="llm_ollama_tool_fail",
+            )
+            raise
         reasoning, decisions = _extract_json_array(resp.text)
         return ToolRunResult(
             reasoning_text=reasoning,
@@ -199,6 +218,16 @@ async def analyze_with_tools(
             model=resp.model,
             iterations=1,
         )
+
+    if not groq and not ollama:
+        await fire_operator_alert(
+            category="LLM",
+            summary="analyze_with_tools: Groq and Ollama are both unavailable (not configured).",
+            dedupe_key="llm_no_providers",
+        )
+    elif groq_failed and not ollama:
+        # Groq failure was already alerted above; Ollama missing — no second ping.
+        pass
 
     return ToolRunResult(
         reasoning_text="ERROR: No LLM available (Groq disabled and Ollama not configured).",

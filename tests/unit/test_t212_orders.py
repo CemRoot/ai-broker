@@ -28,12 +28,15 @@ from app.services.t212.client import T212Client
 class _FakeResponse:
     """Minimal ``httpx.Response`` stand-in covering what ``T212Client._request`` reads."""
 
-    def __init__(self, status_code: int = 200, body: dict[str, Any] | None = None):
+    def __init__(self, status_code: int = 200, body: Any | None = None):
         self.status_code = status_code
-        self._body = body or {}
-        self.text = "{}"
+        if body is None:
+            self._body = {}
+        else:
+            self._body = body
+        self.text = "[]" if isinstance(body, list) else "{}"
 
-    def json(self) -> dict[str, Any]:
+    def json(self) -> Any:
         return self._body
 
     def raise_for_status(self) -> None:
@@ -201,3 +204,28 @@ class TestCancelOrder:
         client, _ = _make_client(_FakeResponse(404, {}))
         ok = await client.cancel_order(111)
         assert ok is False
+
+
+# ── equity/metadata/instruments ───────────────────────────────────
+
+
+class TestEquityInstrumentsMetadata:
+    @pytest.mark.asyncio
+    async def test_fetch_builds_stock_etf_set_only(self):
+        payload: list[dict[str, Any]] = [
+            {"ticker": "AAPL_US_EQ", "type": "STOCK", "name": "Apple"},
+            {"ticker": "SPY_CFD_US", "type": "CFD", "name": "S&P CFD"},
+        ]
+        client, http = _make_client(_FakeResponse(200, payload))
+        out = await client.fetch_equity_instruments_list()
+        assert len(out) == 2
+        assert client.tradeable_equity_instrument_count() == 1
+        ok, detail = await client.is_us_equity_instrument_tradeable("AAPL")
+        assert ok is True
+        assert detail == "AAPL_US_EQ"
+        ok2, _ = await client.is_us_equity_instrument_tradeable("SPY")
+        assert ok2 is False
+        assert http.calls[-1]["url"].endswith("/api/v0/equity/metadata/instruments")
+        n_calls = len(http.calls)
+        await client.fetch_equity_instruments_list()
+        assert len(http.calls) == n_calls  # cache hit — no second upstream GET

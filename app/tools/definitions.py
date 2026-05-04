@@ -82,5 +82,25 @@ TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_t212_equity_instrument",
+            "description": (
+                "When execution is Trading 212 equity: verify a US-style symbol (e.g. AAPL) exists "
+                "as a STOCK/ETF in this account's invest universe (not CFD-only). Call before BUY proposals."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Base symbol (AAPL) or T212 ticker (AAPL_US_EQ).",
+                    },
+                },
+                "required": ["ticker"],
+            },
+        },
+    },
 ]
 

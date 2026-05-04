@@ -6,13 +6,16 @@ Each handler receives services from ``context.bot_data`` (injected at setup).
 
 from __future__ import annotations
 
+import html
 import re
 
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from app.core.logging import get_logger
 from app.services.analysis_runner import run_symbol_analysis
+from app.services.telegram_operator_alerts import fire_operator_alert, format_exc_brief
 from app.services.paper.account_currency import resolve_paper_account_currency
 from app.services.t212.ticker_map import t212_to_yfinance
 from app.services.finnhub_news import fetch_company_news
@@ -52,12 +55,21 @@ def _check_user(update: Update, allowed_ids: set[int]) -> bool:
     return False
 
 
-async def _send_long(update: Update, text: str) -> None:
+async def _send_long(
+    update: Update,
+    text: str,
+    *,
+    parse_mode: str | None = None,
+) -> None:
     """Send a message, splitting into chunks if it exceeds Telegram limits."""
     if not update.effective_chat:
         return
     for i in range(0, len(text), _MAX_MSG_LEN):
-        await update.effective_chat.send_message(text[i : i + _MAX_MSG_LEN])
+        chunk = text[i : i + _MAX_MSG_LEN]
+        kwargs: dict = {}
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        await update.effective_chat.send_message(chunk, **kwargs)
 
 
 # ── Command handlers ───────────────────────────────────────────────
@@ -87,44 +99,53 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     allowed = context.bot_data.get("allowed_ids", set())
     if not _check_user(update, allowed):
         return
-    await _send_long(
-        update,
-        "📖 *AI Broker — Komut Rehberi*\n\n"
-        "📊 *PORTFÖY & SANAL HESAP*\n"
-        "• `/portfolio` — T212 hesap özeti (cash, totalValue, P&L) + tüm açık pozisyonlar\n"
-        "• `/paper` — PaperAgent NAV + nakit + bugünkü P&L + açık trade'ler\n"
-        "• `/paper history` — son 10 paper işlem (BUY/SELL, fiyat, reasoning özeti)\n"
-        "• `/paper stats` — kazanma oranı, ortalama R/R, en iyi/kötü trade\n"
-        "• `/paper log` — son cycle'ın tam analiz metni + JSON kararlar\n"
-        "• `/paper reset confirm` — sanal portföyü başlangıç nakdine sıfırla (geri alınamaz)\n\n"
-        "🔍 *ANALİZ*\n"
-        "• `/analyze SYMBOL` — yfinance teknik (RSI, SMA, MACD) + AI tezi\n"
-        "• `/analyze SYMBOL news` — + Finnhub haber duyarlılığı + birleşik AI yorumu\n"
-        "• `/analyze SYMBOL news full` — + PokieTicker tarzı 31 feature genişletilmiş teknik\n"
-        "• `/news SYMBOL` — sadece haber duyarlılığı (Groq llama-3.3-70b batch skoru)\n"
-        "• `/memory SYMBOL` — RAG hafızası (geçmiş trade dersleri, başarı/uyarılar)\n\n"
-        "🤖 *PAPER AGENT KONTROL*\n"
-        "• `/runpaper` — manuel PaperAgent cycle tetikle (programlı tick'i beklemeden)\n"
-        "• `/punishments` — aktif ticker cezaları (peş peşe loss → ticker geçici banlı)\n\n"
-        "📈 *İZLEME*\n"
-        "• `/usage` — bugünkü Groq + Ollama token kullanımı, maliyet özeti\n\n"
-        "💬 *SOHBET (komutsuz mesaj)*\n"
-        "Komutla başlamayan her mesaj broker bağlamıyla cevaplanır:\n"
-        "  • \"AAPL'de neden BUY dedin?\"\n"
-        "  • \"NVDA pozisyonum bugün nasıl?\"\n"
-        "  • \"VIX 25'in üstüne çıkarsa ne olur?\"\n\n"
-        "🔔 *OTOMATİK BİLDİRİMLER (sen istemesen de gelir)*\n"
-        "• Her BUY/SELL → \"Aldım çünkü...\" / \"Sattım çünkü...\" formatında profesyonel kart\n"
-        "• Cycle özetleri (OPEN / MIDDAY / CLOSE) → kararlar + NAV snapshot\n"
-        "• İnvalidasyon → pozisyon gerekçesi bozulduğunda otomatik SELL alarmı\n"
-        "• Acil tetikleyiciler (Trump posts vb.) → 🚨 ACİL etiketi\n\n"
-        "🛒 *EMİR TİPLERİ (PaperAgent T212'ye gönderir)*\n"
-        "• MARKET — anlık likidite, slippage kabul ediliyorsa\n"
-        "• LIMIT — sadece istenen fiyat veya daha iyisinde\n"
-        "• STOP — fiyat tetik seviyesine ulaşınca market emri çıkar\n"
-        "• STOP_LIMIT — stop tetik + limit fiyat (slippage sınırı)\n"
-        "AI hangisinin uygun olduğuna kendi karar verir.",
+    # HTML for stable typography (Telegram Markdown is easy to break on special chars).
+    def esc(s: str) -> str:
+        return html.escape(s, quote=False)
+
+    body = "\n".join(
+        [
+            "<b>AI Broker — Komut Rehberi</b>",
+            "",
+            "<u>Portföy ve sanal hesap</u>",
+            f"• <code>/portfolio</code> — {esc('T212 hesap özeti (cash, totalValue, P&L) + açık pozisyonlar')}",
+            f"• <code>/paper</code> — {esc('PaperAgent NAV, nakit, bugünkü P&L, açık trade')}",
+            f"• <code>/paper history</code> — {esc('Son 10 paper işlem (BUY/SELL, fiyat, reasoning özeti)')}",
+            f"• <code>/paper stats</code> — {esc('Kazanma oranı, ortalama R/R, en iyi/kötü trade')}",
+            f"• <code>/paper log</code> — {esc('Son cycle analizi + JSON kararlar')}",
+            f"• <code>/paper reset confirm</code> — {esc('Sanal portföyü başlangıç nakdine sıfırla (geri alınamaz)')}",
+            "",
+            "<u>Analiz</u>",
+            f"• <code>/analyze SYMBOL</code> — {esc('yfinance teknik (RSI, SMA, MACD) + AI tezi')}",
+            f"• <code>/analyze SYMBOL news</code> — {esc('+ Finnhub haber duyarlılığı + birleşik AI')}",
+            f"• <code>/analyze SYMBOL news full</code> — {esc('+ 31 feature genişletilmiş teknik')}",
+            f"• <code>/news SYMBOL</code> — {esc('Haber duyarlılığı (Groq batch)')}",
+            f"• <code>/memory SYMBOL</code> — {esc('RAG: dersler, başarı/uyarı')}",
+            "",
+            "<u>Paper Agent</u>",
+            f"• <code>/runpaper</code> — {esc('Manuel cycle (programlı tick beklemeden)')}",
+            f"• <code>/punishments</code> — {esc('Aktif ticker cezaları (peş peşe loss → geçici ban)')}",
+            "",
+            "<u>İzleme</u>",
+            f"• <code>/usage</code> — {esc('Groq + Ollama token / maliyet özeti')}",
+            "",
+            "<u>Sohbet (komutsuz)</u>",
+            esc("Komutla başlamayan mesajlar broker bağlamıyla yanıtlanır. Örnek:"),
+            f"• {esc('AAPL için neden BUY dedin?')}",
+            f"• {esc('NVDA pozisyonum bugün nasıl?')}",
+            "",
+            "<u>Otomatik bildirimler</u>",
+            esc(
+                "BUY/SELL kartları, OPEN/MIDDAY/CLOSE özetleri, invalidasyon SELL, acil tetikleyiciler. "
+                "Kritik LLM / PaperAgent hataları (Groq↔Ollama fallback vb.) aynı sohbete operatör uyarısı olarak düşer "
+                "(TELEGRAM_OPERATOR_ALERTS_ENABLED)."
+            ),
+            "",
+            "<u>T212 emir tipleri (PaperAgent)</u>",
+            esc("MARKET, LIMIT, STOP, STOP_LIMIT — model uygun olanı seçer."),
+        ]
     )
+    await _send_long(update, body, parse_mode=ParseMode.HTML)
 
 
 # ── Free-text chat handler ──────────────────────────────────────────
@@ -197,6 +218,12 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _send_long(update, out)
     except Exception as exc:
         log.error("chat_handler ollama failed: %s", exc)
+        await fire_operator_alert(
+            category="Telegram · Sohbet",
+            summary="chat_handler: Ollama cevap üretemedi.",
+            detail=format_exc_brief(exc),
+            dedupe_key="telegram_chat_ollama",
+        )
         await _send_long(update, f"⚠️ Sohbet hatası: {type(exc).__name__}: {exc}")
 
 

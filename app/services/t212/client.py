@@ -4,6 +4,7 @@ Async HTTP client for the Trading 212 Public API.
 Key design decisions
 --------------------
 * **Endpoints covered (official docs, https://t212public-api-docs.redoc.ly):**
+    * ``GET   /api/v0/equity/metadata/instruments``         — ~1 req / 50 s (cached in-process)
     * ``GET   /api/v0/equity/positions``                    — 1 req / 5 s class
     * ``GET   /api/v0/equity/account/summary``              — 1 req / 30 s class
     * ``POST  /api/v0/equity/orders/market``                — 1 req / 1 s
@@ -42,6 +43,7 @@ import httpx
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.services.t212.models import Position
+from app.services.t212.ticker_map import t212_to_yfinance, yfinance_to_t212
 
 log = get_logger("t212")
 
@@ -56,6 +58,11 @@ _MAX_RETRIES: int = 3
 
 # Back-off multiplier for retries (seconds).
 _BACKOFF_BASE: float = 2.0
+
+# Official instruments list is heavily rate-limited (~1 call / 50s). Cache + cooldown.
+_INSTRUMENTS_API_COOLDOWN_SEC: float = 50.0
+_INSTRUMENTS_CACHE_TTL_SEC: float = 3600.0
+_TRADEABLE_EQUITY_TYPES: frozenset[str] = frozenset({"STOCK", "ETF"})
 
 # Allowed values for the `timeValidity` request body field.
 TimeValidity = Literal["DAY", "GOOD_TILL_CANCEL"]
@@ -83,6 +90,11 @@ class T212Client:
         # Rate-limit state
         self._lock = asyncio.Lock()
         self._last_request_at: float = 0.0
+        self._instruments_lock = asyncio.Lock()
+        self._equity_instruments: list[dict[str, Any]] | None = None
+        self._equity_instruments_loaded_mono: float = 0.0
+        self._last_instruments_request_mono: float = -10_000.0
+        self._tradeable_equity_tickers: frozenset[str] = frozenset()
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -297,6 +309,82 @@ class T212Client:
             params["ticker"] = ticker
         resp = await self._request("GET", "/equity/history/orders", params=params)
         return resp.json()
+
+    async def fetch_equity_instruments_list(self, *, force: bool = False) -> list[dict[str, Any]]:
+        """``GET /equity/metadata/instruments`` — account invest universe (STOCK/ETF).
+
+        Cached for :data:`_INSTRUMENTS_CACHE_TTL_SEC`; consecutive upstream calls are
+        spaced by :data:`_INSTRUMENTS_API_COOLDOWN_SEC` per official rate guidance.
+        """
+        async with self._instruments_lock:
+            now = time.monotonic()
+            if (
+                not force
+                and self._equity_instruments is not None
+                and (now - self._equity_instruments_loaded_mono) < _INSTRUMENTS_CACHE_TTL_SEC
+            ):
+                return list(self._equity_instruments)
+            if (
+                self._equity_instruments is not None
+                and (now - self._last_instruments_request_mono) < _INSTRUMENTS_API_COOLDOWN_SEC
+            ):
+                return list(self._equity_instruments)
+
+            try:
+                resp = await self._request("GET", "/equity/metadata/instruments")
+                data = resp.json()
+            except Exception as exc:
+                log.error("T212 instruments fetch failed: %s: %s", type(exc).__name__, exc)
+                if self._equity_instruments is not None:
+                    return list(self._equity_instruments)
+                return []
+
+            if not isinstance(data, list):
+                log.warning("T212 instruments: expected JSON list, got %s", type(data).__name__)
+                data = []
+
+            tradeable: set[str] = set()
+            for rec in data:
+                if not isinstance(rec, dict):
+                    continue
+                ttype = str(rec.get("type") or "").upper().strip()
+                if ttype not in _TRADEABLE_EQUITY_TYPES:
+                    continue
+                tick = str(rec.get("ticker") or "").strip().upper()
+                if tick:
+                    tradeable.add(tick)
+
+            self._equity_instruments = data
+            self._tradeable_equity_tickers = frozenset(tradeable)
+            self._equity_instruments_loaded_mono = time.monotonic()
+            self._last_instruments_request_mono = self._equity_instruments_loaded_mono
+            log.info(
+                "T212 equity instruments cache refreshed (%d tradeable STOCK/ETF tickers)",
+                len(self._tradeable_equity_tickers),
+            )
+            return list(self._equity_instruments)
+
+    def tradeable_equity_instrument_count(self) -> int:
+        """Count of cached STOCK/ETF tickers (0 until first successful fetch)."""
+        return len(self._tradeable_equity_tickers)
+
+    async def is_us_equity_instrument_tradeable(self, yf_or_t212_ticker: str) -> tuple[bool, str]:
+        """Whether *yf_or_t212_ticker* resolves to a tradeable equity STOCK/ETF on this account."""
+        raw = (yf_or_t212_ticker or "").strip().upper()
+        if not raw:
+            return False, "empty ticker"
+        base = t212_to_yfinance(raw) if "_" in raw and raw.endswith("_EQ") else raw
+        base = base.strip().upper()
+        if not base:
+            return False, "empty base symbol"
+        candidate = yfinance_to_t212(base).strip().upper()
+        await self.fetch_equity_instruments_list()
+        if candidate in self._tradeable_equity_tickers:
+            return True, candidate
+        return (
+            False,
+            f"{candidate} not in this account's T212 equity STOCK/ETF list (CFD-only or unsupported)",
+        )
 
     @staticmethod
     def _parse_history_next_path(next_page_path: str) -> tuple[str, dict[str, str]]:

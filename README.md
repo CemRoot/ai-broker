@@ -222,6 +222,8 @@ Minimal viable Phase 2 setup needs at least these keys:
 | `T212_BASE_URL` | `https://demo.trading212.com` (recommended) or `https://live.trading212.com` |
 | `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated Telegram user IDs (**required**; without it commands are rejected) |
+| `TELEGRAM_DISPLAY_SECONDARY_TZ` | Optional IANA zone for a second clock in PaperAgent Telegram lines (default `Europe/Dublin`; empty = ET only) |
+| `TELEGRAM_OPERATOR_ALERTS_ENABLED` | `true` (default): push LLM/PaperAgent failures to the same allow-list as bot commands (`TELEGRAM_OPERATOR_ALERT_COOLDOWN_SEC` dedupes floods) |
 | `SUPABASE_DB_URL` | `postgresql://...` connection string (asyncpg + pgvector) |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | Local fallback LLM (`http://localhost:11434`, `deepseek-r1:14b`) |
 | `FINNHUB_API_KEY` | News & sentiment ([finnhub.io](https://finnhub.io)) |

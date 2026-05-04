@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from telegram.constants import ParseMode
 from telegram.ext import Application
 
 from app.bot.app import register_handlers
@@ -159,6 +160,7 @@ async def test_help_handler_lists_all_commands() -> None:
     await help_handler(update, context)
 
     blob = "\n".join(sent)
+    assert update.effective_chat.send_message.call_args.kwargs.get("parse_mode") == ParseMode.HTML
     for cmd in (
         "/portfolio", "/paper", "/analyze", "/news", "/memory",
         "/runpaper", "/punishments", "/usage",
