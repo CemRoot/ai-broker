@@ -6,11 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`2026-05-04T16:25:00+01:00`:** **Telegram operatör uyarıları** — `app/services/telegram_operator_alerts.py`: `OperatorAlertSink` + `fire_operator_alert` / `configure_operator_alerts` (lifespan’ta `bot_app` + `Settings` ile). Groq hata → Ollama fallback, Ollama hata, LLM yok, `analyze_news_batch`, `run_symbol_analysis`, `PaperAgent.run_forever` döngü exception’ları, `PREFER_LOCAL_LLM` prepass Ollama hatası, Telegram sohbet Ollama hatası → **HTML** kısa mesaj + `<pre>` traceback (cooldown + `dedupe_key`). Ayarlar: `telegram_operator_alerts_enabled` (varsayılan `true`), `telegram_operator_alert_cooldown_sec` (varsayılan `45`); `.env.example` + `README.md`. Birim: `tests/unit/test_telegram_operator_alerts.py`.
+
+- **`2026-05-04T15:48:00+01:00`:** **`TELEGRAM_DISPLAY_SECONDARY_TZ`** (varsayılan `Europe/Dublin`, boş = yalnız ET) — PaperAgent Telegram başlıklarında ET yanında ikinci saat; `.env.example` + `app/core/config.py`. **T212** `GET /api/v0/equity/metadata/instruments` — `T212Client.fetch_equity_instruments_list` (50 s API aralığı + 1 saat in-process cache), `is_us_equity_instrument_tradeable`, `tradeable_equity_instrument_count`; `PAPER_EXECUTION_BACKEND=t212` iken `app/main.py` lifespan’da cache prime. **PaperAgent** BUY öncesi executor katmanında STOCK/ETF listesi doğrulaması (CFD-only / hesapta olmayan sembollerde BUY skip). **LLM aracı** `check_t212_equity_instrument` — `app/tools/definitions.py` + `app/tools/executor.py`. Birim testler: `tests/unit/test_t212_orders.py` (`TestEquityInstrumentsMetadata`), `tests/unit/test_tools_executor.py`, `tests/unit/test_telegram_bot.py` (`ParseMode.HTML`).
+
 ### Changed
+
+- **`2026-05-04T15:48:00+01:00`:** **PaperAgent UX + prompt:** cycle `user_message` içinde çift saat bloğu + “Telegram balonu cihaz yereli” notu; PREMARKET/TICK Telegram feed’i kısaltıldı (B1 — emir yok, `/paper log` yönlendirmesi). Sistem prompt: SPY/QQQ makro vs tradeable ayrımı, gereksiz index HOLD azaltma; Faz 0 bölüm 0’da benchmark ETF’ler **macro only**. **Telegram `/help`:** `ParseMode.HTML`, bölüm başlıkları `<b>/<u>`, komutlar `<code>`. Per-trade bildirim footer’ında çift saat.
+
+- **`2026-05-04T15:52:00+01:00`:** **`README.md`** — ortam değişkenleri tablosuna `TELEGRAM_DISPLAY_SECONDARY_TZ` satırı eklendi.
+
+- **`2026-05-04T18:35:00+03:00`:** **Genel pano — BETA rozeti.** `app/web/static/dashboard.html`: üst marka satırında **Beta** etiketi (`abbr` + `title` açıklaması); sayfa başlığı `… (Beta)`.
+
+- **`2026-05-04T17:15:00+03:00`:** **Genel pano (`/finance`) — görsel / UX (CEO: göz yorma, daha profesyonel broker paneli).** `app/web/static/dashboard.html`: palet yumuşatıldı (daha düşük kontrastlı koyu zemin, sakin yeşil/kırmızı vurgular); kırmızı DYOR + sarı veri şeridi yerine **tek compliance bandı** (üstte kısa İngilizce özet + `<details>` içinde tam TR/EN disclaimer); canlı veri bağlamı **`.feed-line`** ( nötr mono şerit ); NYSE oturum bandı emoji yerine **`.session-bar--open` / `--closed`** sol accent çizgisi + düz metin; hata bandı ve kart içi yardımcı metinler sadeleştirildi; `STALE` rozeti CSS sınıfına taşındı; footer metni kısaltıldı. Davranış/API aynı.
 
 - **`2026-05-04T14:40:00+01:00`:** **Üretim VPS — GitHub `main` senkron + Docker yenileme:** `~/ai-broker` üzerinde `git pull --rebase origin main` (8b7c389→7b416d5) + `docker compose up -d --build --force-recreate ai-broker`; `ollama` servisi yeniden oluşturulmadı (Running/Healthy). Yerel doğrulama: `curl http://127.0.0.1:8000/health` → `status: ok`, `ai-broker-ai-broker-1` healthy.
 
+- **`2026-05-04T19:10:00+03:00`:** **Üretim VPS — TrumpMonitor commit + imaj:** `git pull --rebase origin main` (2e0b6e2) + `docker compose up -d --build --force-recreate ai-broker`; ilk anlık `/health` bağlantı hatası (warm-up), kısa gecikmeyle **`status: ok`**, `groq_configured: true`. `POST /internal/trump/pull` (konteyner içi `INTERNAL_API_KEY`) → HTTP 200, örnek yanıt `fetched:0` (timeline boş veya upstream; anahtar değerleri loglanmadı).
+
 ### Fixed
+
+- **`2026-05-04T19:05:00+03:00`:** **TrumpMonitor — `trump_posts.post_text` boş kalması (boost/reblog).** Mastodon uyumlu API’de üst `content` sık boş; asıl metin `reblog.content` altında. **`app/services/trump_monitor.py`:** `_mastodon_html_to_plain` + `_status_plain_text` artık önce dış metin, sonra reblog, `spoiler_text`, ardından medya yoksa **`[Media-only post — no status text]`**, aksi halde **`[No text in status]`** (DB `NOT NULL` ile uyumlu). Birim: `tests/unit/test_trump_monitor.py` (`test_mastodon_html_to_plain_strips_tags`, `test_status_plain_text_reblog_when_outer_empty`, `test_status_plain_text_media_only_placeholder`).
 
 - **`2026-05-04T13:10:00+01:00`:** **PaperAgent (T212 backend) duplicate BUY guard:** kullanıcı bildirimi “SPY T212’deyken tekrar almaya çalışıyor olabilir”. Kök neden: BUY akışı `_t212_execute_buy` içinde order basmadan önce aynı ticker için broker tarafı exposure/pending kontrolü yapmıyordu; Supabase mirror poll tabanlı olduğu için (özellikle mobil/web’den dışarıdan order açıldığında) DB henüz güncellenmeden ikinci BUY niyeti oluşabiliyordu. `app/agents/paper_agent.py` yeni `_has_t212_buy_exposure(...)` helper’ı eklendi: **(1)** `get_positions(ticker)` ile açık long var mı, **(2)** `get_all_pending_orders()` içinde aynı ticker için BUY queue var mı (`side=BUY` veya `quantity>0`). Herhangi biri true ise BUY skip + warning log (`existing open position` / `pending BUY already queued`). Böylece T212 “truth” baz alınarak tekrar BUY engelleniyor; mirror gecikmesi duplicate order’a yol açmıyor.
 
