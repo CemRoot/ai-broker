@@ -103,6 +103,7 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
             "account_currency": currency,
             "total_value": None,
             "cash_available": None,
+            "cash_reserved_for_orders": None,
             "cash_blocked": None,
             "position_count": 0,
             "positions": [],
@@ -127,20 +128,12 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
             acct_cur = str(summary.get("currency") or currency or "USD").upper()[:3]
             tv = float(summary.get("totalValue") or 0.0)
             cash_b = summary.get("cash") or {}
-            # T212 ``cash`` schema: total, free, blocked, invested, ppl, …
-            # ``availableToTrade`` ≅ ``free`` for the public summary call.
-            avail = float(cash_b.get("availableToTrade") or cash_b.get("free") or 0.0)
-            blocked = float(cash_b.get("blocked") or 0.0)
-            cash_total_raw = cash_b.get("total")
-            cash_total = float(cash_total_raw) if cash_total_raw is not None else None
-            # Some endpoints leave ``blocked`` at 0 for market orders queued
-            # outside RTH (the cash is just removed from ``free``). Recompute
-            # from cash totals when possible — this is independent of any
-            # open-positions market value, unlike ``totalValue - free``.
-            if blocked < 0.005 and cash_total is not None:
-                implied_cash_blocked = max(0.0, cash_total - avail)
-                if implied_cash_blocked > 0.005:
-                    blocked = implied_cash_blocked
+            # T212 ``cash`` schema (verified against demo summary):
+            #   availableToTrade, reservedForOrders, inPies
+            # No ``blocked`` / ``free`` / ``total`` keys. The cash sitting in
+            # open buy orders is exposed as ``reservedForOrders``.
+            avail = float(cash_b.get("availableToTrade") or 0.0)
+            reserved = float(cash_b.get("reservedForOrders") or 0.0)
             pos_out: list[dict[str, Any]] = []
             for p in sorted(pos_live, key=lambda x: x.ticker):
                 yf = t212_to_yfinance(p.ticker)
@@ -162,22 +155,27 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
                 )
             pending_out: list[dict[str, Any]] = []
             for o in pending_raw:
-                # Trading 212 schema: id, ticker, quantity (signed), type
-                # (MARKET|LIMIT|STOP|STOP_LIMIT), limitPrice, stopPrice,
-                # filledQuantity, filledValue, value (notional, signed),
-                # status, creationTime, strategy ('QUANTITY'|'VALUE').
-                # See https://t212public-api-docs.redoc.ly/.
+                # Trading 212 order schema (verified against demo /equity/orders):
+                #   id, strategy ('QUANTITY'|'VALUE'), type
+                #   (MARKET|LIMIT|STOP|STOP_LIMIT), ticker, quantity,
+                #   filledQuantity, status, currency, side ('BUY'|'SELL'),
+                #   createdAt, instrument {ticker, name, isin, currency},
+                #   limitPrice / stopPrice (only for LIMIT/STOP variants).
                 qty = float(o.get("quantity") or 0.0)
-                value_signed = o.get("value")
-                notional = abs(float(value_signed)) if value_signed is not None else None
+                side_raw = (o.get("side") or "").upper()
+                side = side_raw if side_raw in ("BUY", "SELL") else ("BUY" if qty >= 0 else "SELL")
+                instr = o.get("instrument") or {}
                 pending_out.append(
                     {
                         "order_id": o.get("id"),
                         "t212_ticker": o.get("ticker"),
                         "symbol": t212_to_yfinance(o.get("ticker") or ""),
-                        "side": "BUY" if qty >= 0 else "SELL",
+                        "instrument_name": instr.get("name"),
+                        "side": side,
                         "quantity": abs(qty),
+                        "filled_quantity": float(o.get("filledQuantity") or 0.0),
                         "type": (o.get("type") or "").upper(),
+                        "strategy": (o.get("strategy") or "").upper(),
                         "limit_price": (
                             round(float(o["limitPrice"]), 4)
                             if o.get("limitPrice") is not None
@@ -188,11 +186,23 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
                             if o.get("stopPrice") is not None
                             else None
                         ),
-                        "notional": round(notional, 2) if notional is not None else None,
+                        # Notional isn't part of the orders payload (T212 only
+                        # returns it after fill). For market BUYs it can be
+                        # approximated from cash.reservedForOrders / count
+                        # client-side; we leave it null here for accuracy.
+                        "notional": None,
                         "status": o.get("status"),
-                        "created_at": o.get("creationTime"),
+                        "created_at": o.get("createdAt"),
                     }
                 )
+            # Approximate notional per pending order when there's only one
+            # — T212 reservedForOrders divided by 1 == that order's notional.
+            # With multiple orders we cannot split this without per-order
+            # math, so we leave them null to avoid false precision.
+            if len(pending_out) == 1 and reserved > 0.005:
+                pending_out[0]["notional"] = round(reserved, 2)
+                pending_out[0]["notional_source"] = "cash_reserved_for_orders"
+
             out = {
                 "ok": True,
                 "fetched_at": fetched_iso,
@@ -200,7 +210,10 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
                 "account_currency": acct_cur,
                 "total_value": round(tv, 2),
                 "cash_available": round(avail, 2),
-                "cash_blocked": round(blocked, 2),
+                "cash_reserved_for_orders": round(reserved, 2),
+                # ``cash_blocked`` kept for backward compatibility with the
+                # dashboard that already reads it; same value as the new key.
+                "cash_blocked": round(reserved, 2),
                 "position_count": len(pos_out),
                 "positions": pos_out,
                 "pending_orders": pending_out,
