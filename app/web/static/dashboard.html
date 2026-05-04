@@ -372,6 +372,8 @@
   <main id="main">
     <div id="err-box" class="banner-err" hidden></div>
 
+    <div id="session-banner" class="data-strip" aria-live="polite" hidden style="margin-bottom:1rem"></div>
+
     <div class="dyor-notice" role="note">
       <strong>Do your own research (DYOR)</strong>
       Bu panel yatırım tavsiyesi değildir; buradaki rakamlar garanti veya “beklenen getiri” anlamına gelmez. Trading 212 veya başka bir aracı kurumun resmi ekranı yerine geçmez.
@@ -451,8 +453,11 @@
       <div class="card">
         <div class="card-h">
           <span>Latest decisions</span>
-          <span>PaperAgent cycle</span>
+          <span id="dec-meta">PaperAgent cycle</span>
         </div>
+        <p class="data-strip" style="margin:0.5rem 0.75rem 0;font-size:0.7rem">
+          Decisions are model proposals. The executor enforces ≤8% stop, R/R ≥ 2, ~20% NAV cap and active-punishment skips — proposals failing these are dropped. See the audit table below for actual fills.
+        </p>
         <div class="log" id="decisions"></div>
       </div>
     </div>
@@ -593,10 +598,11 @@
     if (ta && ta.ok) {
       const drift = d.ledger_t212_total_drift;
       const driftTxt = drift != null ? fmtMoney(cur, drift) : '—';
+      const flatNote = ta.position_count === 0 ? ' Broker account is flat (0 open positions).' : '';
       el.textContent =
         'Refresh snapshot: ' + g + ' UTC. NAV shown = Trading 212 totalValue (same definition as the T212 app summary). ' +
-        'Supabase shadow ledger drift vs T212 total: ' + driftTxt + ' (ledger row updated ~' + lu + '). ' +
-        'Trade table = Supabase paper_trades audit (can lag on pending fills).';
+        'Supabase shadow ledger drift vs T212 total: ' + driftTxt + ' (ledger row updated ~' + lu + ').' +
+        flatNote + ' Trade table = Supabase paper_trades audit (can lag on pending fills).';
     } else if ((d.paper_execution_backend || '') === 't212') {
       el.textContent =
         'Refresh: ' + g + ' UTC. T212 API could not be read (' + (ta && ta.error ? ta.error : 'unknown') + '); NAV and position table fall back to the Supabase shadow ledger (last update ~' + lu + '). Not identical to the app until sync succeeds.';
@@ -606,11 +612,55 @@
     }
   }
 
+  function fmtRel(ms) {
+    const sec = Math.max(0, Math.round(ms / 1000));
+    if (sec < 60) return sec + 's';
+    const m = Math.round(sec / 60);
+    if (m < 60) return m + 'm';
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return rem ? h + 'h ' + rem + 'm' : h + 'h';
+  }
+
+  function setSessionBanner(d) {
+    const el = document.getElementById('session-banner');
+    const ms = d.market_session;
+    if (!ms) { el.hidden = true; return; }
+    const cycles = (d.cycles || []);
+    const lastCycleAt = cycles.length ? cycles[0].created_at : null;
+    let lastCycleNote = '';
+    if (lastCycleAt) {
+      try {
+        const ageMs = Date.now() - new Date(lastCycleAt).getTime();
+        if (ageMs > 0 && ageMs < 1000 * 60 * 60 * 24 * 30) {
+          lastCycleNote = ' Last PaperAgent cycle ' + fmtRel(ageMs) + ' ago (' + (lastCycleAt || '').slice(0, 16).replace('T', ' ') + ' UTC).';
+        }
+      } catch (_) { /* ignore */ }
+    }
+    if (ms.is_open) {
+      el.hidden = false;
+      el.style.color = 'var(--green)';
+      const closeTxt = ms.next_close_et ? ms.next_close_et.replace('T', ' ').slice(0, 16) : '—';
+      el.textContent = '🟢 NYSE open · next close ~' + closeTxt + ' ET. PaperAgent runs at OPEN (09:30) / MIDDAY (12:00) / CLOSE (15:45) ET.' + lastCycleNote;
+    } else {
+      el.hidden = false;
+      el.style.color = 'var(--amber)';
+      const openTxt = ms.next_open_et ? ms.next_open_et.replace('T', ' ').slice(0, 16) : '—';
+      let inTxt = '';
+      try {
+        const inMs = new Date(ms.next_open_et).getTime() - Date.now();
+        if (inMs > 0) inTxt = ' (in ' + fmtRel(inMs) + ')';
+      } catch (_) { /* ignore */ }
+      el.textContent = '🟡 NYSE closed · next open ' + openTxt + ' ET' + inTxt + '. New decisions and trades resume at the next OPEN.' + lastCycleNote;
+    }
+  }
+
   function renderPositions(cur, d) {
     const tb = document.getElementById('pos-tbody');
     const src = document.getElementById('pos-src');
     const ta = d.t212_account;
     tb.innerHTML = '';
+    // Case A — T212 reachable AND has at least one open position.
     if (ta && ta.ok && ta.positions && ta.positions.length) {
       src.textContent = 'Trading 212 API · ' + (ta.fetched_at || '').slice(11, 19) + ' UTC';
       for (const r of ta.positions) {
@@ -631,6 +681,13 @@
       }
       return;
     }
+    // Case B — T212 reachable but the account is genuinely flat.
+    if (ta && ta.ok && (!ta.positions || ta.positions.length === 0)) {
+      src.textContent = 'Trading 212 API · 0 open positions · ' + (ta.fetched_at || '').slice(11, 19) + ' UTC';
+      tb.innerHTML = '<tr><td colspan="7" style="color:var(--muted)">No open positions on the broker right now (account is flat).</td></tr>';
+      return;
+    }
+    // Case C — T212 errored; fall back to the Supabase shadow ledger.
     if (ta && !ta.ok && ta.error) {
       src.textContent = 'T212 API error — ledger fallback';
     } else if ((d.paper_execution_backend || '') === 't212') {
@@ -744,69 +801,132 @@
     }
   }
 
-  async function tick() {
-    const stamp = document.getElementById('stamp');
+  async function fetchWithTimeout(url, ms) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), ms);
     try {
-      const [hRes, dRes] = await Promise.all([
-        fetch('/health', { cache: 'no-store' }),
-        fetch('/public/live', { cache: 'no-store' }),
-      ]);
-      if (!dRes.ok) {
-        setErr(dRes.status === 404
-          ? 'Public dashboard is disabled on this host (set PUBLIC_DASHBOARD_ENABLED=true).'
-          : 'Failed to load /public/live (' + dRes.status + ').');
-        stamp.textContent = 'Disconnected';
-        return;
-      }
-      setErr('');
-      const d = await dRes.json();
-      if (hRes.ok) renderHealth(await hRes.json());
-
-      const cur = d.currency || 'USD';
-      setDataStrip(d);
-      const navVal = d.nav_display != null ? d.nav_display : d.nav_estimate;
-      const taOk = d.t212_account && d.t212_account.ok;
-      document.getElementById('m-nav-label').textContent = taOk
-        ? 'Total value (Trading 212)'
-        : 'Estimated NAV (Supabase ledger)';
-      document.getElementById('m-nav').textContent = fmtMoney(cur, navVal || 0);
-      let sub = fmtPct(d.nav_change_pct || 0) + ' vs start · ' + fmtMoney(cur, d.starting_nav || 0) + ' baseline';
-      if (taOk && d.ledger_t212_total_drift != null && Math.abs(d.ledger_t212_total_drift) > 0.005) {
-        sub += ' · Ledger drift ' + fmtMoney(cur, d.ledger_t212_total_drift);
-      }
-      document.getElementById('m-nav-d').textContent = sub;
-      const pnl = d.today_realized_pnl || 0;
-      const elP = document.getElementById('m-pnl');
-      elP.textContent = fmtMoney(cur, pnl);
-      elP.className = 'val ' + (pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : '');
-      paint(
-        document.getElementById('st-pa'),
-        d.paper_agent_enabled ? 'enabled' : 'disabled',
-        d.paper_agent_enabled ? 'ok' : 'warn',
-      );
-      const pc = taOk && d.t212_account.position_count != null
-        ? d.t212_account.position_count
-        : (d.position_count != null ? d.position_count : 0);
-      document.getElementById('m-pos').textContent = String(pc);
-      document.getElementById('m-be').textContent = (d.paper_execution_backend || '') + ' · agent ' + (d.paper_agent_enabled ? 'on' : 'off');
-      document.getElementById('m-mem').textContent = String(d.memories_count != null ? d.memories_count : 0);
-
-      renderPositions(cur, d);
-      renderDecisions(d.cycles || []);
-      renderThink(d.cycles || []);
-      renderTrades(cur, d.trades || []);
-      renderPnlChart(cur, d.pnl_by_day || []);
-
-      stamp.textContent = 'Live · ' + new Date().toISOString().slice(11, 19) + ' UTC';
-    } catch (e) {
-      console.error(e);
-      setErr('Network error while refreshing.');
-      stamp.textContent = 'Offline';
+      return await fetch(url, { cache: 'no-store', signal: ac.signal });
+    } finally {
+      clearTimeout(t);
     }
   }
 
+  async function fetchJsonRetry(url, opts) {
+    const o = opts || {};
+    const timeoutMs = o.timeoutMs || 20000;
+    const tries = o.tries || 2;
+    let lastErr;
+    for (let i = 0; i < tries; i++) {
+      try {
+        const res = await fetchWithTimeout(url, timeoutMs);
+        return res;
+      } catch (e) {
+        lastErr = e;
+        if (i < tries - 1) await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+    throw lastErr || new Error('fetch failed: ' + url);
+  }
+
+  let consecutiveFailures = 0;
+
+  async function tick() {
+    const stamp = document.getElementById('stamp');
+    let dRes, hRes;
+    try {
+      // Health is cheap and local — short timeout, fail-soft.
+      // /public/live can hit T212 (rate-limited 2.05s) — give it up to 25s with 2 tries.
+      const results = await Promise.allSettled([
+        fetchJsonRetry('/health', { timeoutMs: 8000, tries: 2 }),
+        fetchJsonRetry('/public/live', { timeoutMs: 25000, tries: 2 }),
+      ]);
+      hRes = results[0].status === 'fulfilled' ? results[0].value : null;
+      dRes = results[1].status === 'fulfilled' ? results[1].value : null;
+    } catch (e) {
+      // Should not happen with allSettled, but guard anyway.
+      console.error(e);
+    }
+
+    if (!dRes) {
+      consecutiveFailures += 1;
+      // Be quiet on a single transient failure — networks blip; don't scare the user.
+      if (consecutiveFailures >= 2) {
+        setErr('Network error while refreshing — retrying every 60s. Last good snapshot still shown.');
+        stamp.textContent = 'Reconnecting…';
+      } else {
+        stamp.textContent = 'Retrying…';
+      }
+      return;
+    }
+
+    if (!dRes.ok) {
+      consecutiveFailures += 1;
+      setErr(dRes.status === 404
+        ? 'Public dashboard is disabled on this host (set PUBLIC_DASHBOARD_ENABLED=true).'
+        : 'Failed to load /public/live (' + dRes.status + ').');
+      stamp.textContent = 'Disconnected';
+      return;
+    }
+
+    let d;
+    try {
+      d = await dRes.json();
+    } catch (e) {
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 2) setErr('Snapshot returned invalid JSON.');
+      stamp.textContent = 'Reconnecting…';
+      return;
+    }
+
+    consecutiveFailures = 0;
+    setErr('');
+
+    if (hRes && hRes.ok) {
+      try { renderHealth(await hRes.json()); } catch (_) { /* ignore */ }
+    }
+
+    const cur = d.currency || 'USD';
+    setDataStrip(d);
+    setSessionBanner(d);
+    const navVal = d.nav_display != null ? d.nav_display : d.nav_estimate;
+    const taOk = d.t212_account && d.t212_account.ok;
+    document.getElementById('m-nav-label').textContent = taOk
+      ? 'Total value (Trading 212)'
+      : 'Estimated NAV (Supabase ledger)';
+    document.getElementById('m-nav').textContent = fmtMoney(cur, navVal || 0);
+    let sub = fmtPct(d.nav_change_pct || 0) + ' vs start · ' + fmtMoney(cur, d.starting_nav || 0) + ' baseline';
+    if (taOk && d.ledger_t212_total_drift != null && Math.abs(d.ledger_t212_total_drift) > 0.005) {
+      sub += ' · Ledger drift ' + fmtMoney(cur, d.ledger_t212_total_drift);
+    }
+    document.getElementById('m-nav-d').textContent = sub;
+    const pnl = d.today_realized_pnl || 0;
+    const elP = document.getElementById('m-pnl');
+    elP.textContent = fmtMoney(cur, pnl);
+    elP.className = 'val ' + (pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : '');
+    paint(
+      document.getElementById('st-pa'),
+      d.paper_agent_enabled ? 'enabled' : 'disabled',
+      d.paper_agent_enabled ? 'ok' : 'warn',
+    );
+    const pc = taOk && d.t212_account.position_count != null
+      ? d.t212_account.position_count
+      : (d.position_count != null ? d.position_count : 0);
+    document.getElementById('m-pos').textContent = String(pc);
+    document.getElementById('m-be').textContent = (d.paper_execution_backend || '') + ' · agent ' + (d.paper_agent_enabled ? 'on' : 'off');
+    document.getElementById('m-mem').textContent = String(d.memories_count != null ? d.memories_count : 0);
+
+    renderPositions(cur, d);
+    renderDecisions(d.cycles || []);
+    renderThink(d.cycles || []);
+    renderTrades(cur, d.trades || []);
+    renderPnlChart(cur, d.pnl_by_day || []);
+
+    stamp.textContent = 'Live · ' + new Date().toISOString().slice(11, 19) + ' UTC';
+  }
+
   tick();
-  setInterval(tick, 45000);
+  // 60s — keep client load light through Vercel rewrite + Cloudflare Tunnel chain.
+  setInterval(tick, 60000);
 })();
   </script>
 </body>

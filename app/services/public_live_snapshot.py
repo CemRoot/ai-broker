@@ -68,9 +68,35 @@ async def build_public_live_snapshot(request: Request) -> dict[str, Any]:
     db = getattr(request.app.state, "db", None)
     bot_app = getattr(request.app.state, "bot_app", None)
     t212 = getattr(request.app.state, "t212", None)
+    market_clock = getattr(request.app.state, "market_clock", None)
 
     health = build_health_payload(settings=settings, db=db, bot_app=bot_app)
     pool = db.get_pool() if db else None
+
+    # Market session — give the dashboard enough signal to explain why a
+    # weekend / overnight snapshot has no fresh decisions.
+    market_session: dict[str, Any] | None = None
+    if market_clock is not None:
+        try:
+            from zoneinfo import ZoneInfo
+
+            et = ZoneInfo("America/New_York")
+            now_et = datetime.now(tz=et)
+            is_open = bool(market_clock.is_market_open(now_et))
+            next_open_et = next_close_et = None
+            if not is_open:
+                next_open_et = market_clock.next_open(now_et).isoformat()
+            else:
+                next_close_et = market_clock.next_close(now_et).isoformat()
+            market_session = {
+                "is_open": is_open,
+                "now_et": now_et.isoformat(),
+                "next_open_et": next_open_et,
+                "next_close_et": next_close_et,
+            }
+        except Exception as exc:
+            log.debug("market_session probe failed: %s", exc)
+            market_session = None
 
     currency = "USD"
     if settings:
@@ -330,6 +356,7 @@ async def build_public_live_snapshot(request: Request) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "ledger_updated_at": ledger_updated_at,
         "health": health,
+        "market_session": market_session,
         "currency": display_currency,
         "starting_nav": starting_nav,
         "nav_estimate": round(ledger_nav, 2),
