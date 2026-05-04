@@ -30,6 +30,18 @@ async def web_analysis_ui(request: Request):
     return FileResponse(path, media_type="text/html; charset=utf-8")
 
 
+@router.get("/finance")
+async def public_finance_dashboard(request: Request):
+    """Live paper dashboard (static HTML; polls ``/public/live``)."""
+    settings = getattr(request.app.state, "settings", None)
+    if not settings or not getattr(settings, "public_dashboard_enabled", False):
+        raise HTTPException(status_code=404, detail="Public dashboard disabled")
+    path = _STATIC_DIR / "dashboard.html"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="Dashboard bundle missing")
+    return FileResponse(path, media_type="text/html; charset=utf-8")
+
+
 @router.post("/ui/analyze")
 async def web_ui_analyze(
     request: Request,

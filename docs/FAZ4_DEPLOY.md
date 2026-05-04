@@ -49,6 +49,8 @@ curl -s http://127.0.0.1:8000/health
 4. `TELEGRAM_WEBHOOK_SECRET` doldurun; Telegram’da secret token ayarıyla uyumlu olsun.
 5. **Public Hostname tablosundaki “Origin configurations” sütununda `0` görünmesi** çoğu zaman **ek origin policy sayısı**dır; **connector’ın çalışmadığı** anlamına gelmez. Doğrulama: dış ağdan `curl -sS https://<hostname>/health` → HTTP **200** ve JSON; veya Tunnel sayfasında **Status: Healthy** / log’da `Registered tunnel connection`.
 
+6. **İsteğe bağlı — `GET /finance` canlı pano:** `PUBLIC_DASHBOARD_ENABLED=true` iken broker `https://<hostname>/finance` üzerinden HTML döner. T212 paper modunda NAV ve açık pozisyonlar **aynı istekte** Trading 212 Public API’den okunur (uygulamadaki özetle hizalı); `PUBLIC_DASHBOARD_CORS_ORIGINS` ile harici statik siteden `GET /public/live` çağrısına izin verilebilir. Bu yüzey yatırım tavsiyesi değildir; üretimde TLS + bilinçli açılma önerilir.
+
 ## OCI ARM (ör. 4 vCPU / 24GB)
 
 - **Groq birincil LLM** ise ağır yük çoğunlukla dışarıdadır; bu makine API + bot + DB bağlantısı için genelde yeterli.

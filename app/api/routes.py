@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.services.analysis_runner import analysis_result_to_api_dict, run_symbol_analysis
 from app.services.finnhub_news import fetch_company_news
 from app.services.news_pipeline import analyze_news_batch
+from app.services.public_live_snapshot import build_public_live_snapshot
 from app.tools.technical_extended import get_extended_price_features
 
 log = get_logger("api")
@@ -107,6 +108,20 @@ async def health(request: Request):
         db=getattr(request.app.state, "db", None),
         bot_app=getattr(request.app.state, "bot_app", None),
     )
+
+
+@router.get("/public/live", tags=["public"])
+async def public_live_dashboard(request: Request):
+    """Read-only paper snapshot for ``GET /finance`` (no ``INTERNAL_API_KEY``).
+
+    With ``PAPER_EXECUTION_BACKEND=t212``, open positions and ``nav_display`` prefer
+    live Trading 212 Public API values on each request; the Supabase ledger is still
+    exposed for drift checks and trade history.
+    """
+    settings = getattr(request.app.state, "settings", None)
+    if not settings or not getattr(settings, "public_dashboard_enabled", False):
+        raise HTTPException(404, "Public dashboard disabled")
+    return await build_public_live_snapshot(request)
 
 
 # ── Internal / dev endpoints ────────────────────────────────────────

@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     web_ui_enabled: bool = False
     #: When non-empty, ``/internal/*`` requires header ``X-Internal-Api-Key`` (same value). Browser ``/ui`` uses ``POST /ui/analyze`` instead.
     internal_api_key: str = ""
+    #: Public live dashboard: ``GET /public/live`` + ``GET /finance``. No internal API key; disable on untrusted hosts if you do not want paper stats public.
+    public_dashboard_enabled: bool = False
+    #: Comma-separated browser origins allowed to call ``GET /public/live`` (CORS). Empty = no extra CORS (same-origin ``/finance`` only).
+    public_dashboard_cors_origins: str = ""
 
     # ── Faz 1.5-d — Truth Social / Trump monitor ────────────────────
     truth_social_email: str = ""

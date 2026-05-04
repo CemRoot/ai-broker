@@ -291,6 +291,8 @@ The bot is also a menu — Telegram clients show the commands above in a tap-to-
 | Path | Method | Description |
 |---|---|---|
 | `/health` | GET | Liveness + integration flags |
+| `/public/live` | GET | Public paper snapshot (when `PUBLIC_DASHBOARD_ENABLED=true`). With `PAPER_EXECUTION_BACKEND=t212`, NAV and open positions are read from the **Trading 212 Public API** on each request; trade rows remain the Supabase audit mirror. |
+| `/finance` | GET | Static dashboard HTML (same flag; polls `/public/live` + `/health`) |
 | `/ui` | GET | Browser analysis page (only when `WEB_UI_ENABLED=true`) |
 | `/internal/positions` | GET | T212 open positions |
 | `/internal/technical/extended?symbol=AMD` | GET | 31-feature OHLCV row |
@@ -303,6 +305,8 @@ The bot is also a menu — Telegram clients show the commands above in a tap-to-
 | `/docs` | GET | Auto-generated Swagger UI |
 
 When `INTERNAL_API_KEY` is set, every `/internal/*` request must carry `X-Internal-Api-Key`.
+
+**Public dashboard:** not financial advice; figures are informational and can lag or diverge from the broker app (pending orders, sync, API errors). Optional CORS: `PUBLIC_DASHBOARD_CORS_ORIGINS` (comma-separated).
 
 ---
 

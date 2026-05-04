@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
@@ -378,3 +379,17 @@ app = FastAPI(
 
 app.include_router(api_router)
 app.include_router(web_router)
+
+_cfg = get_settings()
+_cors_origins = [
+    o.strip()
+    for o in (getattr(_cfg, "public_dashboard_cors_origins", "") or "").split(",")
+    if o.strip()
+]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["GET", "HEAD", "OPTIONS"],
+        allow_headers=["*"],
+    )
