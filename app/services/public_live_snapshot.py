@@ -127,8 +127,20 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
             acct_cur = str(summary.get("currency") or currency or "USD").upper()[:3]
             tv = float(summary.get("totalValue") or 0.0)
             cash_b = summary.get("cash") or {}
-            avail = float(cash_b.get("availableToTrade") or 0.0)
+            # T212 ``cash`` schema: total, free, blocked, invested, ppl, …
+            # ``availableToTrade`` ≅ ``free`` for the public summary call.
+            avail = float(cash_b.get("availableToTrade") or cash_b.get("free") or 0.0)
             blocked = float(cash_b.get("blocked") or 0.0)
+            cash_total_raw = cash_b.get("total")
+            cash_total = float(cash_total_raw) if cash_total_raw is not None else None
+            # Some endpoints leave ``blocked`` at 0 for market orders queued
+            # outside RTH (the cash is just removed from ``free``). Recompute
+            # from cash totals when possible — this is independent of any
+            # open-positions market value, unlike ``totalValue - free``.
+            if blocked < 0.005 and cash_total is not None:
+                implied_cash_blocked = max(0.0, cash_total - avail)
+                if implied_cash_blocked > 0.005:
+                    blocked = implied_cash_blocked
             pos_out: list[dict[str, Any]] = []
             for p in sorted(pos_live, key=lambda x: x.ticker):
                 yf = t212_to_yfinance(p.ticker)
