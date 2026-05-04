@@ -95,7 +95,7 @@ async def build_public_live_snapshot(request: Request) -> dict[str, Any]:
                 "next_close_et": next_close_et,
             }
         except Exception as exc:
-            log.debug("market_session probe failed: %s", exc)
+            log.warning("market_session probe failed: %s: %s", type(exc).__name__, exc)
             market_session = None
 
     currency = "USD"
