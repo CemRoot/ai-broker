@@ -7,8 +7,10 @@ No secrets, no internal API key — intended for a small audience showcase
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,6 +21,20 @@ from app.services.paper.account_currency import resolve_paper_account_currency
 from app.services.t212.ticker_map import t212_to_yfinance
 
 log = get_logger("public_live")
+
+# Server-side cache for the T212 fetch inside ``/public/live``.
+#
+# Why: T212 Public API enforces *per-endpoint* rate limits (e.g. ``equity/positions``
+# ≈ 1 req / 5 s, ``account/info`` ≈ 1 req / 30 s). The dashboard polls every 60 s
+# and ``T212MirrorPoller`` polls every 90 s — when those align we get a 429 storm
+# that delays every public-live response by 6+ seconds. A short snapshot cache
+# (30 s) shields T212 from the public surface without hiding real movement: paper
+# trades execute on cycle boundaries (≥ minutes apart), so a half-minute lag is
+# invisible to humans watching the dashboard.
+_T212_CACHE_TTL_SEC: float = 30.0
+_t212_cache: dict[str, Any] | None = None
+_t212_cache_at: float = 0.0
+_t212_cache_lock = asyncio.Lock()
 
 _MAX_ANALYSIS = 900
 _MAX_REASON = 320
@@ -41,6 +57,88 @@ def truncate(text: str, max_len: int) -> str:
     if len(t) <= max_len:
         return t
     return t[: max_len - 1] + "…"
+
+
+async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]:
+    """Return a cached T212 ``account+positions`` snapshot for the public dashboard.
+
+    A ~30 s in-process cache absorbs concurrent ``/public/live`` callers and
+    background pollers so we don't churn through the per-endpoint rate budget.
+    On error we cache the failure briefly too — repeatedly hammering a degraded
+    upstream just makes things worse.
+    """
+    global _t212_cache, _t212_cache_at
+    now = time.monotonic()
+    if _t212_cache is not None and (now - _t212_cache_at) < _T212_CACHE_TTL_SEC:
+        # Stamp ``cached_age_s`` so the dashboard can hint at staleness.
+        cached = dict(_t212_cache)
+        cached["cached_age_s"] = round(now - _t212_cache_at, 1)
+        return cached
+
+    async with _t212_cache_lock:
+        # Re-check inside the lock to avoid a thundering herd.
+        now = time.monotonic()
+        if _t212_cache is not None and (now - _t212_cache_at) < _T212_CACHE_TTL_SEC:
+            cached = dict(_t212_cache)
+            cached["cached_age_s"] = round(now - _t212_cache_at, 1)
+            return cached
+
+        fetched_iso = datetime.now(timezone.utc).isoformat()
+        out: dict[str, Any] = {
+            "ok": False,
+            "fetched_at": fetched_iso,
+            "error": None,
+            "account_currency": currency,
+            "total_value": None,
+            "cash_available": None,
+            "position_count": 0,
+            "positions": [],
+            "cached_age_s": 0.0,
+        }
+        try:
+            summary = await t212.get_account_summary()
+            pos_live = await t212.get_positions()
+            acct_cur = str(summary.get("currency") or currency or "USD").upper()[:3]
+            tv = float(summary.get("totalValue") or 0.0)
+            cash_b = summary.get("cash") or {}
+            avail = float(cash_b.get("availableToTrade") or 0.0)
+            pos_out: list[dict[str, Any]] = []
+            for p in sorted(pos_live, key=lambda x: x.ticker):
+                yf = t212_to_yfinance(p.ticker)
+                qty = float(p.quantity or 0.0)
+                avg = float(p.average_price_paid or 0.0)
+                last = float(p.current_price or 0.0)
+                cur_val = qty * last if last > 0 and qty > 0 else None
+                pos_out.append(
+                    {
+                        "t212_ticker": p.ticker,
+                        "symbol": yf,
+                        "quantity": qty,
+                        "average_price_paid": round(avg, 6),
+                        "current_price": round(last, 6),
+                        "current_value": round(cur_val, 2) if cur_val is not None else None,
+                        "ppl": round(float(p.pnl), 4),
+                        "ppl_percent": round(float(p.pnl_percent), 4),
+                    }
+                )
+            out = {
+                "ok": True,
+                "fetched_at": fetched_iso,
+                "error": None,
+                "account_currency": acct_cur,
+                "total_value": round(tv, 2),
+                "cash_available": round(avail, 2),
+                "position_count": len(pos_out),
+                "positions": pos_out,
+                "cached_age_s": 0.0,
+            }
+        except Exception as exc:
+            log.warning("public live T212 fetch failed: %s", exc)
+            out["error"] = f"{type(exc).__name__}: {exc!s}"[:240]
+
+        _t212_cache = out
+        _t212_cache_at = time.monotonic()
+        return dict(out)
 
 
 def parse_paper_cycle_content(content: str) -> tuple[str, list[dict[str, Any]]]:
@@ -76,7 +174,6 @@ async def build_public_live_snapshot(request: Request) -> dict[str, Any]:
     # Market session — give the dashboard enough signal to explain why a
     # weekend / overnight snapshot has no fresh decisions.
     market_session: dict[str, Any] | None = None
-    log.info("market_session probe: market_clock_present=%s", market_clock is not None)
     if market_clock is not None:
         try:
             from zoneinfo import ZoneInfo
@@ -280,56 +377,7 @@ async def build_public_live_snapshot(request: Request) -> dict[str, Any]:
 
     t212_account: dict[str, Any] | None = None
     if settings and getattr(settings, "paper_executes_on_t212", False) and t212 is not None:
-        t212_fetched = datetime.now(timezone.utc).isoformat()
-        t212_account = {
-            "ok": False,
-            "fetched_at": t212_fetched,
-            "error": None,
-            "account_currency": currency,
-            "total_value": None,
-            "cash_available": None,
-            "position_count": 0,
-            "positions": [],
-        }
-        try:
-            summary = await t212.get_account_summary()
-            pos_live = await t212.get_positions()
-            acct_cur = str(summary.get("currency") or currency or "USD").upper()[:3]
-            tv = float(summary.get("totalValue") or 0.0)
-            cash_b = summary.get("cash") or {}
-            avail = float(cash_b.get("availableToTrade") or 0.0)
-            pos_out: list[dict[str, Any]] = []
-            for p in sorted(pos_live, key=lambda x: x.ticker):
-                yf = t212_to_yfinance(p.ticker)
-                qty = float(p.quantity or 0.0)
-                avg = float(p.average_price_paid or 0.0)
-                last = float(p.current_price or 0.0)
-                cur_val = qty * last if last > 0 and qty > 0 else None
-                pos_out.append(
-                    {
-                        "t212_ticker": p.ticker,
-                        "symbol": yf,
-                        "quantity": qty,
-                        "average_price_paid": round(avg, 6),
-                        "current_price": round(last, 6),
-                        "current_value": round(cur_val, 2) if cur_val is not None else None,
-                        "ppl": round(float(p.pnl), 4),
-                        "ppl_percent": round(float(p.pnl_percent), 4),
-                    }
-                )
-            t212_account = {
-                "ok": True,
-                "fetched_at": t212_fetched,
-                "error": None,
-                "account_currency": acct_cur,
-                "total_value": round(tv, 2),
-                "cash_available": round(avail, 2),
-                "position_count": len(pos_out),
-                "positions": pos_out,
-            }
-        except Exception as exc:
-            log.warning("public live T212 fetch failed: %s", exc)
-            t212_account["error"] = f"{type(exc).__name__}: {exc!s}"[:240]
+        t212_account = await _fetch_t212_account_cached(t212, currency)
 
     nav_display = ledger_nav
     nav_display_source = "supabase_ledger"

@@ -32,6 +32,7 @@ curl -s http://127.0.0.1:8000/health
 ```
 
 - **`.env` değişince:** `docker compose restart ai-broker` çoğu zaman **host `.env`’deki yeni değişkenleri konteynere taşımaz** (env ilk `up` anında sabitlenir). Yenilemek için: `docker compose up -d --force-recreate ai-broker` (veya `down` + `up`).
+- **Python kodu değişince (`git pull` sonrası):** **`--force-recreate` tek başına yetmez** — `docker-compose.yml` `build:` direktifi ile image oluşturduğumuz için yeni source ancak rebuild’le konteynere girer. Doğru sıra: `git pull && docker compose build ai-broker && docker compose up -d --force-recreate ai-broker` (veya kısa: `docker compose up -d --build --force-recreate ai-broker`). Aksi takdirde container içinde **eski `/app` source** çalışır, yeni endpoint/branch sessizce yok görünür.
 
 - **`OLLAMA_BASE_URL`:** compose dosyası `http://ollama:11434` yazar; host `.env` içindeki `localhost` üzerine yazar.
 - **Modeller (ilk kurulum):** Ollama konteynerinde:
