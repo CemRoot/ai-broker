@@ -76,6 +76,7 @@ async def build_public_live_snapshot(request: Request) -> dict[str, Any]:
     # Market session — give the dashboard enough signal to explain why a
     # weekend / overnight snapshot has no fresh decisions.
     market_session: dict[str, Any] | None = None
+    log.info("market_session probe: market_clock_present=%s", market_clock is not None)
     if market_clock is not None:
         try:
             from zoneinfo import ZoneInfo
