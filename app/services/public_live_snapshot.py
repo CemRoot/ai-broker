@@ -31,10 +31,22 @@ log = get_logger("public_live")
 # (30 s) shields T212 from the public surface without hiding real movement: paper
 # trades execute on cycle boundaries (≥ minutes apart), so a half-minute lag is
 # invisible to humans watching the dashboard.
-_T212_CACHE_TTL_SEC: float = 30.0
+# Aligned with the dashboard's 60 s polling cadence so each client refresh
+# typically reads the cache instead of triggering an upstream T212 round-trip.
+_T212_CACHE_TTL_SEC: float = 60.0
 _t212_cache: dict[str, Any] | None = None
 _t212_cache_at: float = 0.0
 _t212_cache_lock = asyncio.Lock()
+
+# Whole-snapshot cache — Supabase (cycles + trades + ledger + memories) and the
+# T212 fetch are both rolled into a single dict; with 15 s TTL several browser
+# refreshes inside the same minute share one full computation instead of 4–10
+# seconds of repeated DB round-trips. Background loops (PaperAgent, mirror
+# poller) still write to Supabase directly and are unaffected.
+_SNAPSHOT_CACHE_TTL_SEC: float = 15.0
+_snapshot_cache: dict[str, Any] | None = None
+_snapshot_cache_at: float = 0.0
+_snapshot_cache_lock = asyncio.Lock()
 
 _MAX_ANALYSIS = 900
 _MAX_REASON = 320
@@ -160,6 +172,29 @@ def parse_paper_cycle_content(content: str) -> tuple[str, list[dict[str, Any]]]:
 
 
 async def build_public_live_snapshot(request: Request) -> dict[str, Any]:
+    """Public dashboard snapshot, wrapped in a short whole-response cache."""
+    global _snapshot_cache, _snapshot_cache_at
+
+    now = time.monotonic()
+    if _snapshot_cache is not None and (now - _snapshot_cache_at) < _SNAPSHOT_CACHE_TTL_SEC:
+        cached = dict(_snapshot_cache)
+        cached["snapshot_cached_age_s"] = round(now - _snapshot_cache_at, 1)
+        return cached
+
+    async with _snapshot_cache_lock:
+        now = time.monotonic()
+        if _snapshot_cache is not None and (now - _snapshot_cache_at) < _SNAPSHOT_CACHE_TTL_SEC:
+            cached = dict(_snapshot_cache)
+            cached["snapshot_cached_age_s"] = round(now - _snapshot_cache_at, 1)
+            return cached
+
+        out = await _compute_public_live_snapshot(request)
+        _snapshot_cache = out
+        _snapshot_cache_at = time.monotonic()
+        return dict(out)
+
+
+async def _compute_public_live_snapshot(request: Request) -> dict[str, Any]:
     from app.api.routes import build_health_payload
 
     settings = getattr(request.app.state, "settings", None)
@@ -424,4 +459,5 @@ async def build_public_live_snapshot(request: Request) -> dict[str, Any]:
         "paper_agent_enabled": bool(getattr(settings, "paper_agent_enabled", False)),
         "paper_execution_backend": (getattr(settings, "paper_execution_backend", None) or "supabase"),
         "t212_account": t212_account,
+        "snapshot_cached_age_s": 0.0,
     }
