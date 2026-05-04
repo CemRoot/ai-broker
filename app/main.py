@@ -152,16 +152,36 @@ async def lifespan(app: FastAPI):
         bot_app = build_bot_application(settings)
         await bot_app.initialize()
 
-        if settings.telegram_webhook_url:
-            # Webhook mode: set webhook with Telegram servers
-            webhook_url = f"{settings.telegram_webhook_url.rstrip('/')}/telegram/webhook"
+        hook_base = (settings.telegram_webhook_url or "").strip()
+        hook_secret = (settings.telegram_webhook_secret or "").strip()
+
+        if hook_base and hook_secret:
+            # Webhook mode only — never start getUpdates polling (second consumer = Conflict)
+            webhook_url = f"{hook_base.rstrip('/')}/telegram/webhook"
             await bot_app.bot.set_webhook(
                 url=webhook_url,
-                secret_token=settings.telegram_webhook_secret or None,
+                secret_token=hook_secret,
             )
             log.info("Telegram webhook set: %s", webhook_url)
+            try:
+                wh = await bot_app.bot.get_webhook_info()
+                u = (wh.url or "").strip()
+                log.info(
+                    "Telegram get_webhook_info: active=%s url_host=%s max_connections=%s",
+                    bool(u),
+                    (u.split("/")[2] if u.startswith("http") and len(u.split("/")) > 2 else "(unset)"),
+                    getattr(wh, "max_connections", None),
+                )
+            except Exception as exc:
+                log.warning("Telegram get_webhook_info failed: %s", exc)
+        elif hook_base and not hook_secret:
+            log.critical(
+                "TELEGRAM_WEBHOOK_URL is set but TELEGRAM_WEBHOOK_SECRET is empty — "
+                "refusing polling to avoid Telegram Conflict with a misconfigured webhook. "
+                "Set TELEGRAM_WEBHOOK_SECRET and recreate the container (not docker restart alone)."
+            )
         else:
-            # Polling mode: start updater for local dev
+            # Polling mode: local dev only (single consumer per bot token)
             await bot_app.start()
             await bot_app.updater.start_polling(drop_pending_updates=True)
             log.info("Telegram polling started (dev mode)")
@@ -318,11 +338,20 @@ async def lifespan(app: FastAPI):
     app.state.shadow_ledger_task = shadow_ledger_task
     app.state.trump_pull_task = trump_pull_task
 
+    _tb = (settings.telegram_webhook_url or "").strip()
+    _ts = (settings.telegram_webhook_secret or "").strip()
+    _tg = (
+        "webhook"
+        if _tb and _ts
+        else (
+            "webhook_incomplete"
+            if _tb and not _ts
+            else ("polling" if settings.telegram_bot_token else "off")
+        )
+    )
     log.info(
         "Integrations — telegram=%s, supabase_pool=%s, supabase_dsn_in_env=%s",
-        "webhook"
-        if settings.telegram_webhook_url
-        else ("polling" if settings.telegram_bot_token else "off"),
+        _tg,
         supabase_db.get_pool() is not None,
         bool((settings.supabase_db_url or "").strip()),
     )
@@ -368,7 +397,8 @@ async def lifespan(app: FastAPI):
             log.info("T212 shadow ledger sync stopped")
 
     if bot_app:
-        if not settings.telegram_webhook_url and bot_app.updater:
+        hook_on = bool((settings.telegram_webhook_url or "").strip() and (settings.telegram_webhook_secret or "").strip())
+        if not hook_on and bot_app.updater:
             # Polling mode: stop updater
             await bot_app.updater.stop()
             await bot_app.stop()

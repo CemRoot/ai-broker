@@ -16,14 +16,27 @@ def test_health_telegram_disabled_when_no_token():
     assert body["telegram"]["handlers_ready"] is False
 
 
-def test_health_webhook_mode_when_url_set():
+def test_health_webhook_incomplete_when_url_without_secret():
     s = Settings(
         telegram_bot_token="123:abc",
         telegram_webhook_url="https://example.com",
     )
     body = build_health_payload(settings=s, db=None, bot_app=MagicMock())
+    assert body["telegram"]["mode"] == "webhook_incomplete"
+    assert body["telegram"]["webhook_base_configured"] is True
+    assert body["telegram"]["webhook_secret_configured"] is False
+
+
+def test_health_webhook_mode_when_url_and_secret_set():
+    s = Settings(
+        telegram_bot_token="123:abc",
+        telegram_webhook_url="https://example.com",
+        telegram_webhook_secret="sec",
+    )
+    body = build_health_payload(settings=s, db=None, bot_app=MagicMock())
     assert body["telegram"]["mode"] == "webhook"
     assert body["telegram"]["webhook_base_configured"] is True
+    assert body["telegram"]["webhook_secret_configured"] is True
 
 
 def test_health_web_ui_flag():
@@ -35,6 +48,15 @@ def test_health_web_ui_flag():
     s_on = Settings(web_ui_enabled=True)
     body2 = build_health_payload(settings=s_on, db=None, bot_app=None)
     assert body2["web_ui"]["enabled"] is True
+
+
+def test_health_public_dashboard_flag():
+    s_off = Settings(public_dashboard_enabled=False)
+    body = build_health_payload(settings=s_off, db=None, bot_app=None)
+    assert body["public_dashboard"]["enabled"] is False
+    s_on = Settings(public_dashboard_enabled=True)
+    body2 = build_health_payload(settings=s_on, db=None, bot_app=None)
+    assert body2["public_dashboard"]["enabled"] is True
 
 
 def test_health_memory_db_flags():

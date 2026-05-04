@@ -52,8 +52,12 @@ def build_health_payload(*, settings, db, bot_app) -> dict:
     """JSON for ``GET /health`` (no secrets). Extracted for unit tests."""
     pool_ok = bool(db and db.get_pool())
     token_set = bool(settings and settings.telegram_bot_token)
-    if settings and settings.telegram_webhook_url:
+    hook_base = (settings.telegram_webhook_url or "").strip() if settings else ""
+    hook_secret = (settings.telegram_webhook_secret or "").strip() if settings else ""
+    if settings and hook_base and hook_secret:
         telegram_mode = "webhook"
+    elif settings and hook_base and not hook_secret:
+        telegram_mode = "webhook_incomplete"
     elif token_set:
         telegram_mode = "polling"
     else:
@@ -62,17 +66,18 @@ def build_health_payload(*, settings, db, bot_app) -> dict:
     dsn_configured = bool(settings and (settings.supabase_db_url or "").strip())
 
     web_on = bool(settings and getattr(settings, "web_ui_enabled", False))
+    dash_on = bool(settings and getattr(settings, "public_dashboard_enabled", False))
     return {
         "status": "ok",
         "phase": "5",
         "version": _app_version(),
         "web_ui": {"enabled": web_on},
+        "public_dashboard": {"enabled": dash_on},
         "telegram": {
             "bot_token_configured": token_set,
             "mode": telegram_mode,
-            "webhook_base_configured": bool(
-                settings and (settings.telegram_webhook_url or "").strip()
-            ),
+            "webhook_base_configured": bool(hook_base),
+            "webhook_secret_configured": bool(hook_secret),
             "handlers_ready": bot_app is not None,
         },
         "memory_db": {

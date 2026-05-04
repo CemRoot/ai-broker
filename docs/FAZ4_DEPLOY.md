@@ -52,6 +52,19 @@ curl -s http://127.0.0.1:8000/health
 
 6. **İsteğe bağlı — `GET /finance` canlı pano:** `PUBLIC_DASHBOARD_ENABLED=true` iken broker `https://<hostname>/finance` üzerinden HTML döner. T212 paper modunda NAV ve açık pozisyonlar **aynı istekte** Trading 212 Public API’den okunur (uygulamadaki özetle hizalı); `PUBLIC_DASHBOARD_CORS_ORIGINS` ile harici statik siteden `GET /public/live` çağrısına izin verilebilir. Bu yüzey yatırım tavsiyesi değildir; üretimde TLS + bilinçli açılma önerilir.
 
+### Sorun giderme — `GET /public/live` veya `/finance` HTTP 404
+
+- Bu genelde **route eksikliği değildir**: `PUBLIC_DASHBOARD_ENABLED=false` (varsayılan) iken API kasıtlı **404** döner.
+- Kontrol: `curl -sS http://127.0.0.1:8000/health | jq .public_dashboard` → `enabled: true` olmalı; ayrıca `.env` içinde `PUBLIC_DASHBOARD_ENABLED=true` yazdıktan sonra **`docker compose up -d --build --force-recreate ai-broker`** kullanın — yalnız `docker restart` yeni env’i her zaman taşımaz.
+
+### Sorun giderme — Telegram `Conflict: terminated by other getUpdates request`
+
+- Aynı bot token’ı ile **aynı anda yalnızca bir** süreç `getUpdates` (polling) kullanabilir. İkinci tüketici: başka bir VPS, yerel `uv run uvicorn`, veya eski bir konteyner.
+- **Üretim:** `TELEGRAM_WEBHOOK_URL` **ve** `TELEGRAM_WEBHOOK_SECRET` birlikte dolu olmalı; uygulama bu durumda **yalnızca webhook** kullanır, polling başlatmaz (çift tüketici riskini azaltır).
+- `TELEGRAM_WEBHOOK_URL` dolu ama **secret boş** ise: uygulama **polling’e düşmez** (`/health` içinde `telegram.mode`: `webhook_incomplete`); secret’ı doldurup konteyneri **`--force-recreate`** ile yenileyin.
+- `.env` / webhook değişikliğinden sonra: `docker compose up -d --build --force-recreate ai-broker` (bkz. yukarıdaki “`.env` değişince” notu). Yalnız `docker restart` secret/URL güncellemesini yansıtmayabilir.
+- Truth Social **403 / “Just a moment”** (Cloudflare): veri merkezi egress; Trump akışı bu IP’den kalıcı çalışmayabilir — `TRUMP_MONITOR_ENABLED=false` veya harici cron / farklı ağ seçenekleri için CTO ile hizalanın.
+
 ## OCI ARM (ör. 4 vCPU / 24GB)
 
 - **Groq birincil LLM** ise ağır yük çoğunlukla dışarıdadır; bu makine API + bot + DB bağlantısı için genelde yeterli.
