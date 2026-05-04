@@ -105,6 +105,28 @@ HARD RULES (the math is non-negotiable; the executor enforces them)
 - **Active punishment:** any ticker listed in ACTIVE PUNISHMENTS is auto-SKIP (do not even propose BUY/SELL on it).
 
 ────────────────────────────────────────────────────────────────────────
+ORDER TYPES (Trading 212 Public API — pick the right tool for the setup)
+────────────────────────────────────────────────────────────────────────
+The broker supports four order types. Select by setup quality, not by habit. The executor
+will reject malformed combinations.
+- **MARKET** (default): take immediate liquidity at the current Last Traded Price.
+  Use for emergency exits, time-sensitive entries, and small sizes when slippage is
+  acceptable. No `limit_price` / `stop_price` needed.
+- **LIMIT**: only execute at `limit_price` or better.
+  Use for patient entries near support / pullback zones (BUY at or below limit_price)
+  or planned profit-taking (SELL at or above limit_price). Specify `limit_price`.
+- **STOP**: triggers a market order once Last Traded Price hits `stop_price`.
+  Use for breakout entries (BUY stop above resistance) or stop-loss exits
+  (SELL stop below support). Specify `stop_price`.
+- **STOP_LIMIT**: when `stop_price` is hit, a limit order at `limit_price` is placed —
+  bounds slippage on stop triggers. Specify both `stop_price` AND `limit_price`.
+- **time_validity**: `DAY` (expires at session close) or `GOOD_TILL_CANCEL` (persists).
+  Default to `DAY` for tactical setups; `GOOD_TILL_CANCEL` only for swing thesis with a
+  far-out trigger.
+- For BUY orders, the **risk math uses `effective_entry`** = limit_price (LIMIT/STOP_LIMIT)
+  or stop_price (STOP buy) or current price (MARKET). Plan stop_loss/target accordingly.
+
+────────────────────────────────────────────────────────────────────────
 OUTPUT FORMAT
 ────────────────────────────────────────────────────────────────────────
 1) Chain-of-thought in English (bullet style ok, no markdown code fences). Walk through sections 0→5 briefly.
@@ -113,6 +135,10 @@ OUTPUT FORMAT
    edge_depth (DEEP|MODERATE|SHALLOW), hypothesis, hypothesis_b (optional),
    narrative_vs_reality (optional), steel_man_risk (optional), risk_regime (TIGHT|NORMAL|WIDE, optional),
    edge_freshness (NEW|AGING|EXPIRED, optional),
+   order_type (MARKET|LIMIT|STOP|STOP_LIMIT, default MARKET),
+   limit_price (required for LIMIT and STOP_LIMIT),
+   stop_price (required for STOP and STOP_LIMIT),
+   time_validity (DAY|GOOD_TILL_CANCEL, default DAY),
    reasoning, stop_loss, target, invalidation_condition (required for BUY)."""
 
 
@@ -478,6 +504,40 @@ Return JSON decisions array.
         if action in ("BUY", "SELL") and shares <= 0:
             return None
 
+        # Order routing: MARKET (default), LIMIT, STOP, STOP_LIMIT.
+        order_type = str(d.get("order_type", "MARKET") or "MARKET").upper().strip()
+        if order_type not in ("MARKET", "LIMIT", "STOP", "STOP_LIMIT"):
+            log.warning(
+                "Unsupported order_type %r for %s — defaulting to MARKET", order_type, ticker
+            )
+            order_type = "MARKET"
+        time_validity = str(d.get("time_validity", "DAY") or "DAY").upper().strip()
+        if time_validity not in ("DAY", "GOOD_TILL_CANCEL"):
+            time_validity = "DAY"
+
+        def _coerce_price(val: Any) -> float | None:
+            try:
+                return float(val) if val is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        limit_price = _coerce_price(d.get("limit_price"))
+        stop_price_param = _coerce_price(d.get("stop_price"))
+
+        # Required-field validation per order type (executor layer; LLM is reminded by prompt).
+        if order_type in ("LIMIT", "STOP_LIMIT") and (limit_price is None or limit_price <= 0):
+            log.warning(
+                "Skipping %s %s: order_type=%s requires positive limit_price (got %r)",
+                action, ticker, order_type, d.get("limit_price"),
+            )
+            return None
+        if order_type in ("STOP", "STOP_LIMIT") and (stop_price_param is None or stop_price_param <= 0):
+            log.warning(
+                "Skipping %s %s: order_type=%s requires positive stop_price (got %r)",
+                action, ticker, order_type, d.get("stop_price"),
+            )
+            return None
+
         # Determine price (LLM may omit it). Use yfinance last price as fallback.
         price = d.get("price")
         try:
@@ -490,6 +550,18 @@ Return JSON decisions array.
         if px is None:
             log.warning("No price for %s; cannot execute %s", ticker, action)
             return None
+
+        # `effective_entry` is the price the risk math should be based on (where the
+        # order is *planned* to fill, not the LTP). For MARKET orders this is `px`;
+        # for LIMIT/STOP_LIMIT it's `limit_price`; for a STOP buy it's `stop_price`.
+        if order_type == "MARKET":
+            effective_entry = px
+        elif order_type == "LIMIT":
+            effective_entry = float(limit_price)  # type: ignore[arg-type]
+        elif order_type == "STOP":
+            effective_entry = float(stop_price_param)  # type: ignore[arg-type]
+        else:  # STOP_LIMIT
+            effective_entry = float(limit_price)  # type: ignore[arg-type]
 
         # Risk sizing: ~20% NAV cap is enforced at broker layer for both ledgers.
         # T212 mode uses live ``totalValue`` (account currency) as a NAV proxy; account
@@ -554,26 +626,27 @@ Return JSON decisions array.
                     ticker,
                 )
                 return None
-            if not (0 < stop_loss_f < px) or not (target_f > px):
+            entry_for_risk = effective_entry
+            if not (0 < stop_loss_f < entry_for_risk) or not (target_f > entry_for_risk):
                 log.warning(
-                    "Skipping BUY %s: invalid stop/target geometry (px=%.4f stop=%.4f target=%.4f)",
-                    ticker, px, stop_loss_f, target_f,
+                    "Skipping BUY %s [%s]: invalid stop/target geometry (entry=%.4f stop=%.4f target=%.4f)",
+                    ticker, order_type, entry_for_risk, stop_loss_f, target_f,
                 )
                 return None
-            stop_dist = px - stop_loss_f
-            target_dist = target_f - px
-            stop_pct = stop_dist / px
+            stop_dist = entry_for_risk - stop_loss_f
+            target_dist = target_f - entry_for_risk
+            stop_pct = stop_dist / entry_for_risk
             rr = target_dist / stop_dist if stop_dist > 0 else 0.0
             if stop_pct > 0.08:
                 log.warning(
-                    "Skipping BUY %s: stop too wide (%.2f%% > 8%%); LLM must tighten stop",
-                    ticker, stop_pct * 100.0,
+                    "Skipping BUY %s [%s]: stop too wide (%.2f%% > 8%%); tighten stop",
+                    ticker, order_type, stop_pct * 100.0,
                 )
                 return None
             if rr < 2.0:
                 log.warning(
-                    "Skipping BUY %s: reward/risk %.2f < 2.0 (target=%.4f stop=%.4f entry=%.4f)",
-                    ticker, rr, target_f, stop_loss_f, px,
+                    "Skipping BUY %s [%s]: reward/risk %.2f < 2.0 (target=%.4f stop=%.4f entry=%.4f)",
+                    ticker, order_type, rr, target_f, stop_loss_f, entry_for_risk,
                 )
                 return None
             if self.deps.settings.paper_executes_on_t212:
@@ -591,6 +664,11 @@ Return JSON decisions array.
                     cot=cot or None,
                     cycle_event=cycle_event,
                     emergency=emergency,
+                    order_type=order_type,
+                    limit_price=limit_price,
+                    stop_price=stop_price_param,
+                    time_validity=time_validity,
+                    effective_entry=effective_entry,
                 )
             return await self.deps.paper_broker.buy(
                 ticker,
@@ -620,6 +698,10 @@ Return JSON decisions array.
                     cot=cot or None,
                     cycle_event=cycle_event,
                     emergency=emergency,
+                    order_type=order_type,
+                    limit_price=limit_price,
+                    stop_price=stop_price_param,
+                    time_validity=time_validity,
                 )
             else:
                 trade = await self.deps.paper_broker.sell(
@@ -647,6 +729,52 @@ Return JSON decisions array.
             return trade
         return None
 
+    async def _dispatch_t212_order(
+        self,
+        *,
+        ticker: str,
+        signed_quantity: float,
+        order_type: str,
+        limit_price: float | None,
+        stop_price: float | None,
+        time_validity: str,
+        extended_hours: bool,
+    ) -> dict[str, Any]:
+        """Route an order to the right T212 endpoint based on ``order_type``.
+
+        Quantity sign convention follows T212 docs: positive=BUY, negative=SELL.
+        Required prices are validated upstream by ``_apply_decision``.
+        """
+        assert self.deps.t212 is not None
+        ot = (order_type or "MARKET").upper().strip()
+        if ot == "MARKET":
+            return await self.deps.t212.place_market_order(
+                ticker, signed_quantity, extended_hours=extended_hours,
+            )
+        if ot == "LIMIT":
+            return await self.deps.t212.place_limit_order(
+                ticker, signed_quantity,
+                limit_price=float(limit_price),  # type: ignore[arg-type]
+                time_validity=time_validity,  # type: ignore[arg-type]
+                extended_hours=extended_hours,
+            )
+        if ot == "STOP":
+            return await self.deps.t212.place_stop_order(
+                ticker, signed_quantity,
+                stop_price=float(stop_price),  # type: ignore[arg-type]
+                time_validity=time_validity,  # type: ignore[arg-type]
+                extended_hours=extended_hours,
+            )
+        if ot == "STOP_LIMIT":
+            return await self.deps.t212.place_stop_limit_order(
+                ticker, signed_quantity,
+                stop_price=float(stop_price),  # type: ignore[arg-type]
+                limit_price=float(limit_price),  # type: ignore[arg-type]
+                time_validity=time_validity,  # type: ignore[arg-type]
+                extended_hours=extended_hours,
+            )
+        raise ValueError(f"Unsupported order_type: {order_type!r}")
+
     async def _t212_execute_buy(
         self,
         *,
@@ -660,18 +788,27 @@ Return JSON decisions array.
         cot: str | None,
         cycle_event: str | None,
         emergency: bool,
+        order_type: str = "MARKET",
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        time_validity: str = "DAY",
+        effective_entry: float | None = None,
     ) -> PaperTrade | None:
         assert self.deps.t212 is not None
         t212_sym = yfinance_to_t212(ticker)
         ext = self.deps.settings.paper_t212_extended_hours
         try:
-            order = await self.deps.t212.place_market_order(
-                t212_sym,
-                shares,
+            order = await self._dispatch_t212_order(
+                ticker=t212_sym,
+                signed_quantity=shares,  # buy → positive
+                order_type=order_type,
+                limit_price=limit_price,
+                stop_price=stop_price,
+                time_validity=time_validity,
                 extended_hours=ext,
             )
         except Exception as exc:
-            log.error("T212 BUY failed %s: %s", ticker, exc)
+            log.error("T212 BUY [%s] failed %s: %s", order_type, ticker, exc)
             return None
         oid = order.get("id")
         try:
@@ -733,6 +870,25 @@ Return JSON decisions array.
                 await self.deps.paper_broker.sync_ledger_from_t212_client(self.deps.t212)
             except Exception as exc:
                 log.warning("T212 ledger sync after BUY mirror failed: %s", exc)
+        try:
+            acct_cur = await self._resolve_account_currency()
+            nav_now, _, _ = await self._estimate_nav_mtm()
+            await self._send_trade_notification(
+                trade=trade,
+                order_type=order_type,
+                time_validity=time_validity,
+                reasoning=reasoning,
+                stop_loss=stop_loss_f,
+                target=target_f,
+                invalidation=invalid_s,
+                cycle_event=cycle_event,
+                emergency=emergency,
+                currency=acct_cur,
+                nav_now=nav_now,
+                order_id=oid_int,
+            )
+        except Exception as exc:
+            log.warning("BUY trade notification failed for %s: %s", ticker, exc)
         return trade
 
     async def _t212_execute_sell(
@@ -748,6 +904,10 @@ Return JSON decisions array.
         cot: str | None,
         cycle_event: str | None,
         emergency: bool,
+        order_type: str = "MARKET",
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+        time_validity: str = "DAY",
     ) -> PaperTrade | None:
         assert self.deps.t212 is not None
         t212_sym = yfinance_to_t212(ticker)
@@ -763,13 +923,17 @@ Return JSON decisions array.
         avg = float(pos.average_price_paid)
         ext = self.deps.settings.paper_t212_extended_hours
         try:
-            order = await self.deps.t212.place_market_order(
-                t212_sym,
-                -sell_qty,
+            order = await self._dispatch_t212_order(
+                ticker=t212_sym,
+                signed_quantity=-sell_qty,  # sell → negative
+                order_type=order_type,
+                limit_price=limit_price,
+                stop_price=stop_price,
+                time_validity=time_validity,
                 extended_hours=ext,
             )
         except Exception as exc:
-            log.error("T212 SELL failed %s: %s", ticker, exc)
+            log.error("T212 SELL [%s] failed %s: %s", order_type, ticker, exc)
             return None
         oid = order.get("id")
         try:
@@ -836,7 +1000,131 @@ Return JSON decisions array.
                 await self.deps.paper_broker.sync_ledger_from_t212_client(self.deps.t212)
             except Exception as exc:
                 log.warning("T212 ledger sync after SELL mirror failed: %s", exc)
+        try:
+            acct_cur = await self._resolve_account_currency()
+            nav_now, _, _ = await self._estimate_nav_mtm()
+            await self._send_trade_notification(
+                trade=trade,
+                order_type=order_type,
+                time_validity=time_validity,
+                reasoning=reasoning,
+                stop_loss=stop_loss_f,
+                target=target_f,
+                invalidation=invalid_s,
+                cycle_event=cycle_event,
+                emergency=emergency,
+                currency=acct_cur,
+                nav_now=nav_now,
+                order_id=oid_int,
+            )
+        except Exception as exc:
+            log.warning("SELL trade notification failed for %s: %s", ticker, exc)
         return trade
+
+    async def _send_trade_notification(
+        self,
+        *,
+        trade: PaperTrade,
+        order_type: str,
+        time_validity: str,
+        reasoning: str,
+        stop_loss: float | None,
+        target: float | None,
+        invalidation: str | None,
+        cycle_event: str | None,
+        emergency: bool,
+        currency: str = "USD",
+        nav_now: float | None = None,
+        order_id: int | None = None,
+    ) -> None:
+        """Send a professional, per-trade Telegram alert.
+
+        Format aims to be CEO-readable: WHY (hypothesis), HOW (order type), GUARDRAILS
+        (stop/target/invalidation), and CONTEXT (cycle, account snapshot).
+        """
+        app = self.deps.telegram_application
+        if not app:
+            return
+        allowed = self.deps.settings.allowed_user_ids
+        if not allowed:
+            return
+
+        ac = (currency or "USD").upper()[:3]
+        action = (trade.action or "").upper().strip()
+        is_buy = action == "BUY"
+        emoji = "🟢" if is_buy else "🔻"
+        verb_tr = "ALIM" if is_buy else "SATIM"
+
+        order_label = order_type.upper().replace("_", "-")
+        validity_label = "GTC" if time_validity == "GOOD_TILL_CANCEL" else "DAY"
+        emergency_tag = " 🚨" if emergency else ""
+
+        head = f"{emoji} {verb_tr}{emergency_tag} | {trade.ticker} | {order_label} @ {trade.price:,.2f} {ac} | {validity_label}"
+
+        notional = float(trade.shares) * float(trade.price)
+        nav_pct = ""
+        if nav_now and nav_now > 0:
+            nav_pct = f" ≈ %{(notional / nav_now) * 100:.1f} NAV"
+        notional_line = f"📦 Adet: {float(trade.shares):,.4f} (toplam {notional:,.2f} {ac}{nav_pct})"
+
+        guardrail_parts: list[str] = []
+        if is_buy:
+            if target is not None:
+                tgt_pct = (float(target) - float(trade.price)) / float(trade.price) * 100.0
+                guardrail_parts.append(f"🎯 Hedef {float(target):,.2f} ({tgt_pct:+.1f}%)")
+            if stop_loss is not None:
+                stop_pct = (float(stop_loss) - float(trade.price)) / float(trade.price) * 100.0
+                guardrail_parts.append(f"🛑 Stop {float(stop_loss):,.2f} ({stop_pct:+.1f}%)")
+            if (target is not None) and (stop_loss is not None) and float(trade.price) > float(stop_loss):
+                rr_num = float(target) - float(trade.price)
+                rr_den = float(trade.price) - float(stop_loss)
+                if rr_den > 0:
+                    guardrail_parts.append(f"⚖️ R/R {rr_num / rr_den:.2f}")
+        else:
+            if trade.realized_pnl_usd is not None and trade.pnl_percent is not None:
+                pnl_emoji = "💰" if float(trade.realized_pnl_usd) >= 0 else "🩸"
+                guardrail_parts.append(
+                    f"{pnl_emoji} Realize PnL: {float(trade.realized_pnl_usd):+,.2f} {ac} "
+                    f"({float(trade.pnl_percent):+.2f}%)"
+                )
+
+        why_line = ""
+        clean_reasoning = (reasoning or "").strip().replace("\n", " ")
+        if len(clean_reasoning) > 320:
+            clean_reasoning = clean_reasoning[:320].rstrip() + "…"
+        if clean_reasoning:
+            why_line = f"🧠 {'Aldım' if is_buy else 'Sattım'} çünkü: {clean_reasoning}"
+
+        invalid_line = ""
+        if is_buy and invalidation:
+            inv = invalidation.strip().replace("\n", " ")
+            if len(inv) > 200:
+                inv = inv[:200] + "…"
+            invalid_line = f"🚫 Geçersizleştirici: {inv}"
+
+        footer_bits: list[str] = ["🤖 PaperAgent"]
+        if cycle_event:
+            footer_bits.append(cycle_event[:20])
+        footer_bits.append(datetime.now(tz=ET).strftime("%H:%M ET"))
+        if order_id is not None:
+            footer_bits.append(f"#T212-{order_id}")
+        footer = " | ".join(footer_bits)
+
+        lines = [head, notional_line]
+        if guardrail_parts:
+            lines.append(" · ".join(guardrail_parts))
+        if why_line:
+            lines.append(why_line)
+        if invalid_line:
+            lines.append(invalid_line)
+        lines.append(footer)
+        msg = "\n".join(lines)
+
+        for uid in allowed:
+            try:
+                await app.bot.send_message(chat_id=uid, text=msg)
+            except Exception:
+                pass
 
     async def _send_invalidation_alert(
         self,

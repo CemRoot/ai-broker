@@ -8,7 +8,7 @@ import pytest
 from telegram.ext import Application
 
 from app.bot.app import register_handlers
-from app.bot.handlers import memory_handler, start_handler
+from app.bot.handlers import help_handler, memory_handler, start_handler
 from app.core.config import Settings
 
 
@@ -120,7 +120,8 @@ async def test_memory_handler_no_retriever_message() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_handler_includes_memory_command() -> None:
+async def test_start_handler_points_to_help() -> None:
+    """``/start`` is now a short welcome that funnels users to ``/help`` for the full reference."""
     sent: list[str] = []
 
     update = MagicMock()
@@ -135,4 +136,31 @@ async def test_start_handler_includes_memory_command() -> None:
     await start_handler(update, context)
 
     blob = "\n".join(sent)
-    assert "/memory" in blob
+    # Welcome should link to the new categorized command reference.
+    assert "/help" in blob
+    # Quick-start basics should still be discoverable from /start alone.
+    assert "/portfolio" in blob and "/paper" in blob
+
+
+@pytest.mark.asyncio
+async def test_help_handler_lists_all_commands() -> None:
+    """``/help`` is the canonical command index — every registered command must appear."""
+    sent: list[str] = []
+
+    update = MagicMock()
+    update.effective_chat = MagicMock()
+    update.effective_chat.send_message = AsyncMock(side_effect=lambda text, **_k: sent.append(text))
+    update.effective_user = MagicMock()
+    update.effective_user.id = 1
+
+    context = MagicMock()
+    context.bot_data = {"allowed_ids": {1}}
+
+    await help_handler(update, context)
+
+    blob = "\n".join(sent)
+    for cmd in (
+        "/portfolio", "/paper", "/analyze", "/news", "/memory",
+        "/runpaper", "/punishments", "/usage",
+    ):
+        assert cmd in blob, f"Missing {cmd} in /help output"

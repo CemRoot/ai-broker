@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.bot.handlers import (
     analyze_handler,
     chat_handler,
+    help_handler,
     news_handler,
     portfolio_handler,
     start_handler,
@@ -26,16 +27,20 @@ from app.bot.handlers import (
 )
 
 
+# Telegram BotFather menu — single flat list (Telegram has no native grouping in the
+# menu UI). Order matters: most-used first; descriptions use plain ASCII because
+# Telegram strips most non-emoji glyphs from the menu strip on iOS.
 BOT_MENU_COMMANDS: list[BotCommand] = [
-    BotCommand("portfolio", "T212 hesap ozeti + pozisyonlar"),
-    BotCommand("paper", "Paper hesap (T212 golgesi)"),
+    BotCommand("portfolio", "T212 portfoy ve acik pozisyonlar"),
+    BotCommand("paper", "PaperAgent (sanal hesap, T212 golgesi)"),
     BotCommand("analyze", "Hisse analizi (orn: /analyze AAPL)"),
     BotCommand("news", "Hisse haber ozeti (orn: /news NVDA)"),
     BotCommand("memory", "RAG hafiza gecmisi (orn: /memory NVDA)"),
-    BotCommand("runpaper", "Manuel PaperAgent cycle"),
-    BotCommand("punishments", "Aktif cezalar"),
-    BotCommand("usage", "Gunluk LLM kullanim"),
-    BotCommand("start", "Karsilama + komut listesi"),
+    BotCommand("runpaper", "Manuel PaperAgent cycle tetikle"),
+    BotCommand("punishments", "Aktif ticker cezalari"),
+    BotCommand("usage", "Gunluk LLM token kullanimi"),
+    BotCommand("help", "Detayli komut rehberi"),
+    BotCommand("start", "Karsilama mesaji"),
 ]
 
 log = get_logger("bot.app")
@@ -85,6 +90,7 @@ def register_handlers(
         application.bot_data["allowed_ids"] = set()
 
     application.add_handler(CommandHandler("start", start_handler))
+    application.add_handler(CommandHandler("help", help_handler))
     application.add_handler(CommandHandler("portfolio", portfolio_handler))
     application.add_handler(CommandHandler("analyze", analyze_handler))
     application.add_handler(CommandHandler("news", news_handler))
@@ -96,7 +102,7 @@ def register_handlers(
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
 
     log.info(
-        "Bot handlers registered: 9 commands + free-text chat (allowed_ids=%s)",
+        "Bot handlers registered: 10 commands + free-text chat (allowed_ids=%s)",
         application.bot_data["allowed_ids"] or "all",
     )
 

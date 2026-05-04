@@ -63,31 +63,67 @@ async def _send_long(update: Update, text: str) -> None:
 # ── Command handlers ───────────────────────────────────────────────
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """``/start`` — welcome message."""
+    """``/start`` — short welcome; full reference lives in /help."""
     allowed = context.bot_data.get("allowed_ids", set())
     if not _check_user(update, allowed):
         return
     await _send_long(
         update,
-        "🤖 *AI Broker*\n\n"
-        "Komut menüsü için sol-alttaki menü düğmesini kullan veya / yaz.\n\n"
-        "Sık kullananlar:\n"
-        "• `/portfolio` — T212 açık pozisyonlar\n"
-        "• `/paper` — sanal hesap (T212 gölgesi)\n"
-        "• `/analyze SYMBOL` — teknik + AI\n"
-        "• `/analyze SYMBOL news` — + Finnhub haber skoru + birleşik AI\n"
-        "• `/analyze SYMBOL news full` — + PokieTicker tarzı extended teknik\n"
-        "• `/news SYMBOL` — yalnızca haber toplu skoru\n"
-        "• `/memory SYMBOL` — Supabase RAG geçmiş anılar\n"
-        "• `/paper history` — son 10 paper işlem\n"
-        "• `/paper stats` — özet istatistik\n"
-        "• `/paper log` — son paper cycle analizi\n"
-        "• `/paper reset confirm` — sanal portföyü başlangıç nakdine sıfırla\n"
-        "• `/runpaper` — manuel paper cycle tetikle\n"
-        "• `/punishments` — aktif cezalar\n"
-        "• `/usage` — günlük token kullanımı\n\n"
-        "💬 *Sohbet:* Komutla başlamayan her mesajı bana sor — broker bağlamıyla cevap veririm "
-        "(örn. \"AAPL'de neden BUY dedin?\", \"NVDA pozisyonum nasıl?\").",
+        "🤖 *AI Broker — otonom paper broker*\n"
+        "T212 demo'ya gerçek emir akıtır, kararları kendisi verir, sana profesyonel bildirim atar.\n\n"
+        "Hızlı başlangıç:\n"
+        "• `/portfolio` — T212 hesap özeti + açık pozisyonlar\n"
+        "• `/paper` — PaperAgent durumu (NAV, son cycle, açık trade'ler)\n"
+        "• `/analyze AAPL` — anlık teknik + AI tezi\n"
+        "• `/runpaper` — manuel cycle tetikle\n\n"
+        "📖 *Tüm komutlar*: `/help`\n"
+        "💬 *Sohbet*: komutla başlamayan her mesaj broker bağlamıyla cevaplanır "
+        "(örn. \"AAPL'de neden BUY dedin?\").",
+    )
+
+
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """``/help`` — categorized command reference."""
+    allowed = context.bot_data.get("allowed_ids", set())
+    if not _check_user(update, allowed):
+        return
+    await _send_long(
+        update,
+        "📖 *AI Broker — Komut Rehberi*\n\n"
+        "📊 *PORTFÖY & SANAL HESAP*\n"
+        "• `/portfolio` — T212 hesap özeti (cash, totalValue, P&L) + tüm açık pozisyonlar\n"
+        "• `/paper` — PaperAgent NAV + nakit + bugünkü P&L + açık trade'ler\n"
+        "• `/paper history` — son 10 paper işlem (BUY/SELL, fiyat, reasoning özeti)\n"
+        "• `/paper stats` — kazanma oranı, ortalama R/R, en iyi/kötü trade\n"
+        "• `/paper log` — son cycle'ın tam analiz metni + JSON kararlar\n"
+        "• `/paper reset confirm` — sanal portföyü başlangıç nakdine sıfırla (geri alınamaz)\n\n"
+        "🔍 *ANALİZ*\n"
+        "• `/analyze SYMBOL` — yfinance teknik (RSI, SMA, MACD) + AI tezi\n"
+        "• `/analyze SYMBOL news` — + Finnhub haber duyarlılığı + birleşik AI yorumu\n"
+        "• `/analyze SYMBOL news full` — + PokieTicker tarzı 31 feature genişletilmiş teknik\n"
+        "• `/news SYMBOL` — sadece haber duyarlılığı (Groq llama-3.3-70b batch skoru)\n"
+        "• `/memory SYMBOL` — RAG hafızası (geçmiş trade dersleri, başarı/uyarılar)\n\n"
+        "🤖 *PAPER AGENT KONTROL*\n"
+        "• `/runpaper` — manuel PaperAgent cycle tetikle (programlı tick'i beklemeden)\n"
+        "• `/punishments` — aktif ticker cezaları (peş peşe loss → ticker geçici banlı)\n\n"
+        "📈 *İZLEME*\n"
+        "• `/usage` — bugünkü Groq + Ollama token kullanımı, maliyet özeti\n\n"
+        "💬 *SOHBET (komutsuz mesaj)*\n"
+        "Komutla başlamayan her mesaj broker bağlamıyla cevaplanır:\n"
+        "  • \"AAPL'de neden BUY dedin?\"\n"
+        "  • \"NVDA pozisyonum bugün nasıl?\"\n"
+        "  • \"VIX 25'in üstüne çıkarsa ne olur?\"\n\n"
+        "🔔 *OTOMATİK BİLDİRİMLER (sen istemesen de gelir)*\n"
+        "• Her BUY/SELL → \"Aldım çünkü...\" / \"Sattım çünkü...\" formatında profesyonel kart\n"
+        "• Cycle özetleri (OPEN / MIDDAY / CLOSE) → kararlar + NAV snapshot\n"
+        "• İnvalidasyon → pozisyon gerekçesi bozulduğunda otomatik SELL alarmı\n"
+        "• Acil tetikleyiciler (Trump posts vb.) → 🚨 ACİL etiketi\n\n"
+        "🛒 *EMİR TİPLERİ (PaperAgent T212'ye gönderir)*\n"
+        "• MARKET — anlık likidite, slippage kabul ediliyorsa\n"
+        "• LIMIT — sadece istenen fiyat veya daha iyisinde\n"
+        "• STOP — fiyat tetik seviyesine ulaşınca market emri çıkar\n"
+        "• STOP_LIMIT — stop tetik + limit fiyat (slippage sınırı)\n"
+        "AI hangisinin uygun olduğuna kendi karar verir.",
     )
 
 

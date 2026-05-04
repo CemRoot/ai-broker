@@ -3,9 +3,22 @@ Async HTTP client for the Trading 212 Public API.
 
 Key design decisions
 --------------------
-* **Endpoint:** ``GET /api/v0/equity/positions`` (official docs, rate limit 1 req/s).
+* **Endpoints covered (official docs, https://t212public-api-docs.redoc.ly):**
+    * ``GET   /api/v0/equity/positions``                    — 1 req / 5 s class
+    * ``GET   /api/v0/equity/account/summary``              — 1 req / 30 s class
+    * ``POST  /api/v0/equity/orders/market``                — 1 req / 1 s
+    * ``POST  /api/v0/equity/orders/limit``                 — 1 req / 2 s
+    * ``POST  /api/v0/equity/orders/stop``                  — 1 req / 2 s
+    * ``POST  /api/v0/equity/orders/stop_limit``            — 1 req / 2 s
+    * ``GET   /api/v0/equity/orders``                       — 1 req / 5 s
+    * ``GET   /api/v0/equity/orders/{id}``                  — 1 req / 1 s
+    * ``DELETE /api/v0/equity/orders/{id}``                 — 1 req / 2 s
+    * ``GET   /api/v0/equity/history/orders``               — 1 req / 60 s (paged)
 * **Auth:** HTTP Basic — ``Authorization: Basic Base64(key:secret)``.
 * **Rate limit:** enforced client-side with ``asyncio.Lock`` + monotonic clock.
+  We use a *single global* throttle of ``_MIN_INTERVAL`` (the slowest of the
+  hot-path endpoints we use) so that any combination of order/queries respects
+  the strictest documented bucket.
 * **httpx timeout:** 30 s total, 5 s connect.
 * **Retry:** automatic exponential back-off on 429 (max 3 attempts).
 
@@ -14,6 +27,7 @@ Usage::
     async with httpx.AsyncClient() as http:
         client = T212Client(http, settings)
         positions = await client.get_positions()
+        order = await client.place_limit_order("AAPL_US_EQ", 1.5, limit_price=150.0)
 """
 
 from __future__ import annotations
@@ -21,7 +35,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import time
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -32,14 +46,19 @@ from app.services.t212.models import Position
 log = get_logger("t212")
 
 # Minimum gap between successive T212 API calls (seconds).
-# Official limit is 1 req / 1 s — we use a small safety margin.
-_MIN_INTERVAL: float = 1.05
+# Sized to the slowest hot-path endpoint we use (limit/stop/stop_limit/cancel = 1 req / 2 s,
+# per Context7 docs). Market orders are themselves 1 req / 1 s but interleaving with order
+# variants would otherwise risk 429s, so we keep one safe global bucket + small margin.
+_MIN_INTERVAL: float = 2.05
 
 # Max retry attempts on 429 Too Many Requests.
 _MAX_RETRIES: int = 3
 
 # Back-off multiplier for retries (seconds).
 _BACKOFF_BASE: float = 2.0
+
+# Allowed values for the `timeValidity` request body field.
+TimeValidity = Literal["DAY", "GOOD_TILL_CANCEL"]
 
 
 class T212Client:
@@ -107,9 +126,7 @@ class T212Client:
 
         Beta API is not idempotent; duplicate calls may duplicate orders.
         """
-        q = round(float(quantity), 6)
-        if q == 0:
-            raise ValueError("T212 market order quantity must be non-zero")
+        q = self._normalize_quantity(quantity, kind="market")
         body: dict[str, Any] = {"ticker": ticker, "quantity": q}
         params: dict[str, str] | None = None
         if extended_hours:
@@ -121,6 +138,124 @@ class T212Client:
             json_body=body,
         )
         return resp.json()
+
+    async def place_limit_order(
+        self,
+        ticker: str,
+        quantity: float,
+        *,
+        limit_price: float,
+        time_validity: TimeValidity = "DAY",
+        extended_hours: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /equity/orders/limit`` — execute only at ``limit_price`` or better.
+
+        * ``quantity`` positive → BUY (fills at ``<= limit_price``).
+        * ``quantity`` negative → SELL (fills at ``>= limit_price``).
+        * ``time_validity`` is required by the API: ``DAY`` or ``GOOD_TILL_CANCEL``.
+        * Endpoint rate limit: **1 req / 2 s** (Context7 docs).
+        * Endpoint is **not idempotent** in the public beta; do not retry blindly.
+        """
+        q = self._normalize_quantity(quantity, kind="limit")
+        lp = self._normalize_price(limit_price, name="limit_price")
+        body: dict[str, Any] = {
+            "ticker": ticker,
+            "quantity": q,
+            "limitPrice": lp,
+            "timeValidity": self._normalize_validity(time_validity),
+        }
+        params: dict[str, str] | None = {"extendedHours": "true"} if extended_hours else None
+        resp = await self._request(
+            "POST",
+            "/equity/orders/limit",
+            params=params,
+            json_body=body,
+        )
+        return resp.json()
+
+    async def place_stop_order(
+        self,
+        ticker: str,
+        quantity: float,
+        *,
+        stop_price: float,
+        time_validity: TimeValidity = "DAY",
+        extended_hours: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /equity/orders/stop`` — fires a Market order once LTP touches ``stop_price``.
+
+        * Positive ``quantity`` → buy stop (entry).
+        * Negative ``quantity`` → sell stop (commonly a stop-loss).
+        * Endpoint rate limit: **1 req / 2 s**, **not idempotent**.
+        """
+        q = self._normalize_quantity(quantity, kind="stop")
+        sp = self._normalize_price(stop_price, name="stop_price")
+        body: dict[str, Any] = {
+            "ticker": ticker,
+            "quantity": q,
+            "stopPrice": sp,
+            "timeValidity": self._normalize_validity(time_validity),
+        }
+        params: dict[str, str] | None = {"extendedHours": "true"} if extended_hours else None
+        resp = await self._request(
+            "POST",
+            "/equity/orders/stop",
+            params=params,
+            json_body=body,
+        )
+        return resp.json()
+
+    async def place_stop_limit_order(
+        self,
+        ticker: str,
+        quantity: float,
+        *,
+        stop_price: float,
+        limit_price: float,
+        time_validity: TimeValidity = "DAY",
+        extended_hours: bool = False,
+    ) -> dict[str, Any]:
+        """``POST /equity/orders/stop_limit`` — once LTP hits ``stop_price`` a Limit order at ``limit_price`` is placed.
+
+        * Positive ``quantity`` → buy; negative → sell.
+        * Use to bound slippage on a stop trigger.
+        * Endpoint rate limit: **1 req / 2 s**, **not idempotent**.
+        """
+        q = self._normalize_quantity(quantity, kind="stop_limit")
+        sp = self._normalize_price(stop_price, name="stop_price")
+        lp = self._normalize_price(limit_price, name="limit_price")
+        body: dict[str, Any] = {
+            "ticker": ticker,
+            "quantity": q,
+            "stopPrice": sp,
+            "limitPrice": lp,
+            "timeValidity": self._normalize_validity(time_validity),
+        }
+        params: dict[str, str] | None = {"extendedHours": "true"} if extended_hours else None
+        resp = await self._request(
+            "POST",
+            "/equity/orders/stop_limit",
+            params=params,
+            json_body=body,
+        )
+        return resp.json()
+
+    async def cancel_order(self, order_id: int) -> bool:
+        """``DELETE /equity/orders/{id}`` — request cancellation of a pending order.
+
+        Returns ``True`` on accepted cancel (HTTP 2xx), ``False`` if the order has
+        already left the pending queue (HTTP 404). Other errors propagate.
+        Cancellation is *requested*, not guaranteed (the order may already be filling).
+        """
+        resp = await self._request(
+            "DELETE",
+            f"/equity/orders/{int(order_id)}",
+            pass_through_status={404},
+        )
+        if resp.status_code == 404:
+            log.info("T212 cancel: order %s already terminal/unknown (HTTP 404)", order_id)
+            return False
+        return True
 
     async def get_pending_order(self, order_id: int) -> dict[str, Any] | None:
         """``GET /equity/orders/{id}``. Returns ``None`` if order left the pending queue (404)."""
@@ -265,6 +400,43 @@ class T212Client:
                 log.debug("Throttling T212 request for %.2fs", wait)
                 await asyncio.sleep(wait)
             self._last_request_at = time.monotonic()
+
+    # ── Normalization helpers (defensive client-side validation) ────
+
+    @staticmethod
+    def _normalize_quantity(quantity: float, *, kind: str) -> float:
+        """Return ``quantity`` rounded to 6 dp; raise if zero or non-finite.
+
+        ``kind`` is purely for the error message (which order endpoint failed).
+        """
+        try:
+            q = round(float(quantity), 6)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"T212 {kind} order: quantity must be a number, got {quantity!r}") from exc
+        if q == 0:
+            raise ValueError(f"T212 {kind} order: quantity must be non-zero")
+        return q
+
+    @staticmethod
+    def _normalize_price(price: float, *, name: str) -> float:
+        """Return ``price`` rounded to 4 dp; raise if not strictly positive."""
+        try:
+            p = round(float(price), 4)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"T212 order: {name} must be a number, got {price!r}") from exc
+        if p <= 0:
+            raise ValueError(f"T212 order: {name} must be > 0 (got {p})")
+        return p
+
+    @staticmethod
+    def _normalize_validity(value: str) -> str:
+        """Validate ``timeValidity`` against the API enum."""
+        v = (value or "").upper().strip()
+        if v not in ("DAY", "GOOD_TILL_CANCEL"):
+            raise ValueError(
+                f"T212 order: timeValidity must be 'DAY' or 'GOOD_TILL_CANCEL' (got {value!r})"
+            )
+        return v
 
     @staticmethod
     def _build_auth_header(api_key: str, api_secret: str) -> str:
