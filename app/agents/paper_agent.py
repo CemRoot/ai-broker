@@ -775,6 +775,42 @@ Return JSON decisions array.
             )
         raise ValueError(f"Unsupported order_type: {order_type!r}")
 
+    async def _has_t212_buy_exposure(self, *, t212_ticker: str) -> tuple[bool, str]:
+        """Return ``(True, reason)`` if the ticker already has long exposure or a queued BUY.
+
+        Why:
+        - Users may submit external mobile/web orders while ``PAPER_T212_RECONCILE_EXTERNAL_ORDERS=true``.
+        - Supabase mirror is eventually consistent (poll-based), so a second BUY can be emitted before
+          DB catches up unless we check broker-side truth just before placing a new BUY.
+        """
+        assert self.deps.t212 is not None
+
+        # 1) Filled/open long exposure on broker.
+        try:
+            pos = await self.deps.t212.get_positions(ticker=t212_ticker)
+            if isinstance(pos, list) and pos and float(getattr(pos[0], "quantity", 0.0) or 0.0) > 0:
+                return True, "existing open position on T212"
+        except Exception as exc:
+            log.warning("T212 BUY exposure check (positions) failed for %s: %s", t212_ticker, exc)
+
+        # 2) Pending BUY orders in broker queue (NEW/PENDING/PARTIAL).
+        try:
+            pending = await self.deps.t212.get_all_pending_orders()
+            if not isinstance(pending, list):
+                pending = []
+            for o in pending:
+                if str(o.get("ticker") or "").upper() != t212_ticker.upper():
+                    continue
+                side = str(o.get("side") or "").upper()
+                qty = float(o.get("quantity") or 0.0)
+                if side == "BUY" or (not side and qty > 0):
+                    status = str(o.get("status") or "").upper()
+                    return True, f"pending BUY already queued on T212 (status={status or 'UNKNOWN'})"
+        except Exception as exc:
+            log.warning("T212 BUY exposure check (pending orders) failed for %s: %s", t212_ticker, exc)
+
+        return False, ""
+
     async def _t212_execute_buy(
         self,
         *,
@@ -796,6 +832,10 @@ Return JSON decisions array.
     ) -> PaperTrade | None:
         assert self.deps.t212 is not None
         t212_sym = yfinance_to_t212(ticker)
+        has_exp, why = await self._has_t212_buy_exposure(t212_ticker=t212_sym)
+        if has_exp:
+            log.warning("T212 BUY skipped for %s (%s): %s", ticker, t212_sym, why)
+            return None
         ext = self.deps.settings.paper_t212_extended_hours
         try:
             order = await self._dispatch_t212_order(
