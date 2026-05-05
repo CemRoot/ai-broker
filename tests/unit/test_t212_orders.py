@@ -13,6 +13,7 @@ The HTTP layer is faked with a ``RecordingClient`` that captures the outgoing
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
@@ -28,13 +29,15 @@ from app.services.t212.client import T212Client
 class _FakeResponse:
     """Minimal ``httpx.Response`` stand-in covering what ``T212Client._request`` reads."""
 
-    def __init__(self, status_code: int = 200, body: Any | None = None):
+    def __init__(self, status_code: int = 200, body: Any | None = None, headers: dict[str, str] | None = None):
         self.status_code = status_code
         if body is None:
             self._body = {}
         else:
             self._body = body
         self.text = "[]" if isinstance(body, list) else "{}"
+        self.headers = headers or {}
+        self.request = httpx.Request("GET", "https://demo.trading212.com/api/v0/test")
 
     def json(self) -> Any:
         return self._body
@@ -68,6 +71,28 @@ class RecordingClient:
         return self._response
 
 
+class SequencedRecordingClient:
+    """Returns responses in order then repeats last."""
+
+    def __init__(self, responses: list[_FakeResponse]):
+        self.calls: list[dict[str, Any]] = []
+        self._responses = list(responses)
+
+    async def request(self, method: str, url: str, **kwargs: Any) -> _FakeResponse:
+        self.calls.append(
+            {
+                "method": method,
+                "url": url,
+                "params": kwargs.get("params"),
+                "json": kwargs.get("json"),
+                "headers": kwargs.get("headers"),
+            }
+        )
+        if self._responses:
+            return self._responses.pop(0)
+        return _FakeResponse(200, {})
+
+
 def _make_client(response: _FakeResponse | None = None) -> tuple[T212Client, RecordingClient]:
     fake_http = RecordingClient(response)
     settings = Settings(
@@ -77,6 +102,18 @@ def _make_client(response: _FakeResponse | None = None) -> tuple[T212Client, Rec
     )
     client = T212Client(fake_http, settings)  # type: ignore[arg-type]
     # Bypass throttle for tests so they run fast.
+    client._last_request_at = 0.0
+    return client, fake_http
+
+
+def _make_client_seq(responses: list[_FakeResponse]) -> tuple[T212Client, SequencedRecordingClient]:
+    fake_http = SequencedRecordingClient(responses)
+    settings = Settings(
+        t212_demo_api_key="key",
+        t212_demo_api_secret="secret",
+        t212_base_url="https://demo.trading212.com",
+    )
+    client = T212Client(fake_http, settings)  # type: ignore[arg-type]
     client._last_request_at = 0.0
     return client, fake_http
 
@@ -229,3 +266,59 @@ class TestEquityInstrumentsMetadata:
         n_calls = len(http.calls)
         await client.fetch_equity_instruments_list()
         assert len(http.calls) == n_calls  # cache hit — no second upstream GET
+
+
+class TestSharedReadCacheAndAdaptiveThrottle:
+    @pytest.mark.asyncio
+    async def test_account_summary_cache_hit(self):
+        client, http = _make_client(_FakeResponse(200, {"totalValue": 1}))
+        a = await client.get_account_summary()
+        b = await client.get_account_summary()
+        assert a["totalValue"] == 1 and b["totalValue"] == 1
+        assert len(http.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_positions_cache_hit(self):
+        payload = [
+            {
+                "averagePricePaid": 1.0,
+                "createdAt": "2026-01-01T00:00:00.000+00:00",
+                "currentPrice": 1.0,
+                "instrument": {"ticker": "AAPL_US_EQ"},
+                "quantity": 1.0,
+                "quantityAvailableForTrading": 1.0,
+                "quantityInPies": 0.0,
+                "walletImpact": {},
+            }
+        ]
+        client, http = _make_client(_FakeResponse(200, payload))
+        _ = await client.get_positions()
+        _ = await client.get_positions()
+        assert len(http.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_order_write_invalidates_read_cache(self):
+        payload = {"totalValue": 2}
+        client, http = _make_client(_FakeResponse(200, payload))
+        await client.get_account_summary()
+        await client.place_market_order("AAPL_US_EQ", 1.0)
+        await client.get_account_summary()
+        # summary + place + summary
+        assert len(http.calls) == 3
+
+    @pytest.mark.asyncio
+    async def test_adaptive_backoff_set_when_remaining_low(self):
+        low_hdr = {
+            "x-ratelimit-remaining": "4",
+            "x-ratelimit-reset": "2",
+            "x-ratelimit-limit": "50",
+        }
+        client, http = _make_client_seq([
+            _FakeResponse(200, {"totalValue": 3}, headers=low_hdr),
+            _FakeResponse(200, {"totalValue": 3}),
+        ])
+        await client.get_account_summary(use_cache=False)
+        assert client._global_backoff_until_mono > time.monotonic()
+        assert client._throttled_count >= 1
+        await client.get_account_summary(use_cache=False)
+        assert len(http.calls) == 2

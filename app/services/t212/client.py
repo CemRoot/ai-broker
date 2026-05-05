@@ -63,6 +63,8 @@ _BACKOFF_BASE: float = 2.0
 _INSTRUMENTS_API_COOLDOWN_SEC: float = 50.0
 _INSTRUMENTS_CACHE_TTL_SEC: float = 3600.0
 _TRADEABLE_EQUITY_TYPES: frozenset[str] = frozenset({"STOCK", "ETF"})
+_ACCOUNT_SUMMARY_CACHE_TTL_SEC: float = 60.0
+_POSITIONS_CACHE_TTL_SEC: float = 30.0
 
 # Allowed values for the `timeValidity` request body field.
 TimeValidity = Literal["DAY", "GOOD_TILL_CANCEL"]
@@ -95,10 +97,14 @@ class T212Client:
         self._equity_instruments_loaded_mono: float = 0.0
         self._last_instruments_request_mono: float = -10_000.0
         self._tradeable_equity_tickers: frozenset[str] = frozenset()
+        self._read_cache: dict[str, tuple[float, Any]] = {}
+        self._read_cache_locks: dict[str, asyncio.Lock] = {}
+        self._throttled_count: int = 0
+        self._global_backoff_until_mono: float = 0.0
 
     # ── Public API ──────────────────────────────────────────────────
 
-    async def get_positions(self, ticker: str | None = None) -> list[Position]:
+    async def get_positions(self, ticker: str | None = None, *, use_cache: bool = True) -> list[Position]:
         """Fetch all open positions (or filter by ``ticker``).
 
         Maps to ``GET /api/v0/equity/positions``.
@@ -113,7 +119,19 @@ class T212Client:
         if ticker:
             params["ticker"] = ticker
 
-        resp = await self._request("GET", "/equity/positions", params=params)
+        if ticker:
+            # Per-ticker reads are less frequent and should reflect immediate state.
+            resp = await self._request("GET", "/equity/positions", params=params)
+        elif use_cache:
+            resp = await self._request_cached(
+                "GET",
+                "/equity/positions",
+                cache_key="equity_positions",
+                ttl_sec=_POSITIONS_CACHE_TTL_SEC,
+                params=params,
+            )
+        else:
+            resp = await self._request("GET", "/equity/positions", params=params)
         data = resp.json()
 
         if not isinstance(data, list):
@@ -122,9 +140,17 @@ class T212Client:
 
         return [Position.model_validate(item) for item in data]
 
-    async def get_account_summary(self) -> dict[str, Any]:
+    async def get_account_summary(self, *, use_cache: bool = True) -> dict[str, Any]:
         """``GET /equity/account/summary`` — cash, investments, totalValue (account currency)."""
-        resp = await self._request("GET", "/equity/account/summary")
+        if use_cache:
+            resp = await self._request_cached(
+                "GET",
+                "/equity/account/summary",
+                cache_key="equity_account_summary",
+                ttl_sec=_ACCOUNT_SUMMARY_CACHE_TTL_SEC,
+            )
+        else:
+            resp = await self._request("GET", "/equity/account/summary")
         return resp.json()
 
     async def place_market_order(
@@ -149,6 +175,7 @@ class T212Client:
             params=params,
             json_body=body,
         )
+        self._invalidate_read_cache()
         return resp.json()
 
     async def place_limit_order(
@@ -183,6 +210,7 @@ class T212Client:
             params=params,
             json_body=body,
         )
+        self._invalidate_read_cache()
         return resp.json()
 
     async def place_stop_order(
@@ -215,6 +243,7 @@ class T212Client:
             params=params,
             json_body=body,
         )
+        self._invalidate_read_cache()
         return resp.json()
 
     async def place_stop_limit_order(
@@ -250,6 +279,7 @@ class T212Client:
             params=params,
             json_body=body,
         )
+        self._invalidate_read_cache()
         return resp.json()
 
     async def cancel_order(self, order_id: int) -> bool:
@@ -267,6 +297,7 @@ class T212Client:
         if resp.status_code == 404:
             log.info("T212 cancel: order %s already terminal/unknown (HTTP 404)", order_id)
             return False
+        self._invalidate_read_cache()
         return True
 
     async def get_pending_order(self, order_id: int) -> dict[str, Any] | None:
@@ -443,6 +474,8 @@ class T212Client:
                 await asyncio.sleep(_BACKOFF_BASE ** attempt)
                 continue
 
+            self._apply_rate_limit_headers(resp)
+
             if resp.status_code == 429:
                 wait = _BACKOFF_BASE ** attempt
                 log.warning(
@@ -478,16 +511,101 @@ class T212Client:
             response=resp,  # type: ignore[possibly-undefined]
         )
 
+    async def _request_cached(
+        self,
+        method: str,
+        path: str,
+        *,
+        cache_key: str,
+        ttl_sec: float,
+        params: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        now = time.monotonic()
+        cached = self._read_cache.get(cache_key)
+        if cached and (now - cached[0]) < ttl_sec:
+            log.debug("T212 cache HIT key=%s age=%.1fs ttl=%.1fs", cache_key, now - cached[0], ttl_sec)
+            return cached[1]
+
+        lock = self._read_cache_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            now = time.monotonic()
+            cached = self._read_cache.get(cache_key)
+            if cached and (now - cached[0]) < ttl_sec:
+                log.debug("T212 cache HIT(in-lock) key=%s age=%.1fs ttl=%.1fs", cache_key, now - cached[0], ttl_sec)
+                return cached[1]
+            log.debug("T212 cache MISS key=%s ttl=%.1fs", cache_key, ttl_sec)
+            resp = await self._request(method, path, params=params)
+            self._read_cache[cache_key] = (time.monotonic(), resp)
+            return resp
+
     async def _throttle(self) -> None:
         """Ensure at least ``_MIN_INTERVAL`` seconds between API calls."""
         async with self._lock:
             now = time.monotonic()
+            if now < self._global_backoff_until_mono:
+                wait = self._global_backoff_until_mono - now
+                self._throttled_count += 1
+                log.warning(
+                    "T212 adaptive backoff active — wait %.2fs (throttled_count=%d)",
+                    wait,
+                    self._throttled_count,
+                )
+                await asyncio.sleep(wait)
+                now = time.monotonic()
             elapsed = now - self._last_request_at
             if elapsed < _MIN_INTERVAL:
                 wait = _MIN_INTERVAL - elapsed
                 log.debug("Throttling T212 request for %.2fs", wait)
                 await asyncio.sleep(wait)
             self._last_request_at = time.monotonic()
+
+    def _invalidate_read_cache(self) -> None:
+        self._read_cache.pop("equity_account_summary", None)
+        self._read_cache.pop("equity_positions", None)
+
+    @staticmethod
+    def _parse_reset_seconds(value: str) -> float | None:
+        v = (value or "").strip()
+        if not v:
+            return None
+        try:
+            n = float(v)
+        except Exception:
+            return None
+        # Some APIs return epoch seconds; some return delta seconds.
+        if n > 1_000_000_000:
+            return max(0.0, n - time.time())
+        return max(0.0, n)
+
+    def _apply_rate_limit_headers(self, resp: httpx.Response) -> None:
+        remaining_raw = resp.headers.get("x-ratelimit-remaining", "")
+        reset_raw = resp.headers.get("x-ratelimit-reset", "")
+        limit_raw = resp.headers.get("x-ratelimit-limit", "")
+        try:
+            remaining = int(remaining_raw) if remaining_raw else None
+        except Exception:
+            remaining = None
+        if remaining is not None:
+            log.debug(
+                "T212 rate headers endpoint=%s remaining=%s reset=%s limit=%s",
+                resp.request.url.path if resp.request else "(unknown)",
+                remaining,
+                reset_raw or "?",
+                limit_raw or "?",
+            )
+        if remaining is not None and remaining < 5:
+            reset_in = self._parse_reset_seconds(reset_raw) or 1.0
+            reset_in = min(max(reset_in, 1.0), 60.0)
+            until = time.monotonic() + reset_in
+            if until > self._global_backoff_until_mono:
+                self._global_backoff_until_mono = until
+            self._throttled_count += 1
+            log.warning(
+                "T212 remaining low (%d) — adaptive backoff %.1fs (throttled_count=%d)",
+                remaining,
+                reset_in,
+                self._throttled_count,
+            )
 
     # ── Normalization helpers (defensive client-side validation) ────
 
