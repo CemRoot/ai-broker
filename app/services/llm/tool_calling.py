@@ -152,6 +152,16 @@ def _error_detail(exc: Exception) -> str:
     return " | ".join(parts)
 
 
+def _is_rate_limited(exc: Exception) -> bool:
+    """Return True when provider error is an HTTP 429/rate-limit condition."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status == 429:
+        return True
+    txt = str(exc).lower()
+    return "rate limit" in txt or "error code: 429" in txt or "status=429" in txt
+
+
 async def analyze_with_tools(
     *,
     groq: GroqService | None,
@@ -245,6 +255,18 @@ async def analyze_with_tools(
                 detail=format_exc_brief(exc),
                 dedupe_key="llm_groq_tool_fail",
             )
+            if _is_rate_limited(exc):
+                # Operational safety: when Groq is throttled, avoid cascading into
+                # heavy Ollama fallback paths that can fail on low-memory VPS nodes.
+                return ToolRunResult(
+                    reasoning_text=(
+                        "Groq is temporarily rate-limited (429). "
+                        "Returning no-trade output to keep the agent loop alive."
+                    ),
+                    decisions=[],
+                    model=groq.model,
+                    iterations=len(messages),
+                )
 
     # ── Ollama fallback (no tool calling in this repo yet) ──────────
     if ollama:
