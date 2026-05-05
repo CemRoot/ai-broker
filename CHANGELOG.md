@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`2026-05-05T12:56:00+01:00`:** **Telegram otomatik kartları profesyonel HTML formatına alındı (PaperAgent + Trump alarmı).** `app/agents/paper_agent.py` içinde PREMARKET/TICK canlı feed, acil feed, per-trade BUY/SELL kartı ve invalidation SELL mesajları artık `parse_mode=HTML` ile `<b>/<code>/<i>` kullanıyor; ticker/action/guardrail/NAV blokları daha okunabilir tek-tip kart düzenine taşındı. `app/services/trump_monitor.py` alarm mesajı da HTML karta geçirildi (score/sentiment/sectors/tickers/reasoning alanları). Dinamik metinler `html.escape` ile güvenli render edilir.
+
 - **`2026-05-05T12:52:00+01:00`:** **T212 startup burst azaltımı + erken adaptive backoff.** `app/main.py` içinde T212 ile ilgili startup adımlarına ve T212 kullanan loop başlangıçlarına (`PaperAgent`, `T212MirrorPoller`, shadow-ledger loop) **startup jitter** eklendi (`T212_STARTUP_JITTER_MIN_SEC`, `T212_STARTUP_JITTER_MAX_SEC`, varsayılan 5–15s). `app/services/public_live_snapshot.py` ilk T212 fetch için tek-seferlik startup jitter uygular; `/public/live` ile arka plan loop’larının aynı anda T212’ye yüklenmesi kırılır. `app/services/t212/client.py` adaptive backoff eşiği ayarlanabilir hale getirildi (`T212_ADAPTIVE_REMAINING_THRESHOLD`, varsayılan 10) ve tetikleme `<10` seviyesine alındı.
 
 - **`2026-05-05T12:31:00+01:00`:** **Telegram `/start` mesajı HTML standardına geçirildi.** `app/bot/handlers.py` içinde `start_handler` artık `parse_mode=HTML` ile `<b>` ve `<code>` kullanıyor; ham `*...*` Markdown karakterleri kullanıcıya görünmüyor. Birim güncelleme: `tests/unit/test_telegram_bot.py` (`/start` için `ParseMode.HTML` assert).

@@ -9,6 +9,7 @@ Telegram alerts for high-impact posts.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import random
 import re
@@ -17,6 +18,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from telegram.constants import ParseMode
 
 from app.core.config import Settings
 from app.core.logging import get_logger
@@ -442,21 +444,20 @@ class TrumpMonitor:
             return
 
         lines = [
-            "Trump post — impact alert",
-            f"Score: {rec.impact_score:.1f} (threshold {self._settings.trump_impact_threshold})",
-            f"Sentiment: {rec.sentiment}",
-            f"Sectors: {', '.join(rec.affected_sectors[:8]) or '—'}",
-            f"Tickers: {', '.join(rec.affected_tickers[:12]) or '—'}",
+            f"🚨 <b>Trump Alarmı</b> · <b>{rec.impact_score:.1f}/10</b>",
+            f"<b>Sentiment</b>: {html.escape((rec.sentiment or '').upper())}",
+            f"<b>Sectors</b>: {html.escape(', '.join(rec.affected_sectors[:8]) or '—')}",
+            f"<b>Tickers</b>: {html.escape(', '.join(rec.affected_tickers[:12]) or '—')}",
             "",
-            rec.post_text[:2800],
+            html.escape(rec.post_text[:2800]),
         ]
         if rec.reasoning:
-            lines.extend(["", "Reasoning:", rec.reasoning[:1200]])
+            lines.extend(["", "<b>Reasoning</b>:", html.escape(rec.reasoning[:1200])])
         text = "\n".join(lines)
         bot = self._telegram_app.bot
         for uid in allowed:
             try:
-                await bot.send_message(chat_id=uid, text=text[:4096])
+                await bot.send_message(chat_id=uid, text=text[:4096], parse_mode=ParseMode.HTML)
                 rec.telegram_sent = True
             except Exception as exc:
                 log.error("TrumpMonitor Telegram send failed uid=%s: %s", uid, exc)

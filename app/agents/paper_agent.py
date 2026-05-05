@@ -8,6 +8,7 @@ Groq is primary (tool-calling); Ollama is fallback.
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import time
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ from app.services.t212.client import T212Client
 from app.services.t212.ticker_map import yfinance_to_t212
 from app.tools.definitions import TOOLS
 from app.tools.executor import ToolExecutor
+from telegram.constants import ParseMode
 
 from app.agents.punishment import PunishmentEngine
 from app.agents.position_monitor import PositionMonitor
@@ -1163,13 +1165,19 @@ Return JSON decisions array.
         validity_label = "GTC" if time_validity == "GOOD_TILL_CANCEL" else "DAY"
         emergency_tag = " 🚨" if emergency else ""
 
-        head = f"{emoji} {verb_tr}{emergency_tag} | {trade.ticker} | {order_label} @ {trade.price:,.2f} {ac} | {validity_label}"
+        head = (
+            f"{emoji} <b>{verb_tr}{emergency_tag}</b> · <b>{html.escape(trade.ticker)}</b> · "
+            f"<code>{order_label}</code> @ <b>{trade.price:,.2f} {ac}</b> · <code>{validity_label}</code>"
+        )
 
         notional = float(trade.shares) * float(trade.price)
         nav_pct = ""
         if nav_now and nav_now > 0:
             nav_pct = f" ≈ %{(notional / nav_now) * 100:.1f} NAV"
-        notional_line = f"📦 Adet: {float(trade.shares):,.4f} (toplam {notional:,.2f} {ac}{nav_pct})"
+        notional_line = (
+            f"📦 <b>Adet</b>: <code>{float(trade.shares):,.4f}</code> "
+            f"(toplam <b>{notional:,.2f} {ac}</b>{html.escape(nav_pct)})"
+        )
 
         guardrail_parts: list[str] = []
         if is_buy:
@@ -1197,14 +1205,17 @@ Return JSON decisions array.
         if len(clean_reasoning) > 320:
             clean_reasoning = clean_reasoning[:320].rstrip() + "…"
         if clean_reasoning:
-            why_line = f"🧠 {'Aldım' if is_buy else 'Sattım'} çünkü: {clean_reasoning}"
+            why_line = (
+                f"🧠 <b>{'Aldım' if is_buy else 'Sattım'} çünkü</b>: "
+                f"{html.escape(clean_reasoning)}"
+            )
 
         invalid_line = ""
         if is_buy and invalidation:
             inv = invalidation.strip().replace("\n", " ")
             if len(inv) > 200:
                 inv = inv[:200] + "…"
-            invalid_line = f"🚫 Geçersizleştirici: {inv}"
+            invalid_line = f"🚫 <b>Geçersizleştirici</b>: {html.escape(inv)}"
 
         footer_bits: list[str] = ["🤖 PaperAgent"]
         if cycle_event:
@@ -1212,21 +1223,21 @@ Return JSON decisions array.
         footer_bits.append(_paper_agent_clock_header(self.deps.settings, with_seconds=False))
         if order_id is not None:
             footer_bits.append(f"#T212-{order_id}")
-        footer = " | ".join(footer_bits)
+        footer = " · ".join(html.escape(b) for b in footer_bits)
 
         lines = [head, notional_line]
         if guardrail_parts:
-            lines.append(" · ".join(guardrail_parts))
+            lines.append(" · ".join(html.escape(x) for x in guardrail_parts))
         if why_line:
             lines.append(why_line)
         if invalid_line:
             lines.append(invalid_line)
-        lines.append(footer)
+        lines.append(f"🤖 <i>{footer}</i>")
         msg = "\n".join(lines)
 
         for uid in allowed:
             try:
-                await app.bot.send_message(chat_id=uid, text=msg)
+                await app.bot.send_message(chat_id=uid, text=msg, parse_mode=ParseMode.HTML)
             except Exception:
                 pass
 
@@ -1252,13 +1263,14 @@ Return JSON decisions array.
         if trade.pnl_percent is not None:
             pnl = f" | PnL: {float(trade.pnl_percent):+.1f}%"
         msg = (
-            f"🔴 {ticker} İNVALİDASYON\n"
-            f"Koşul: {cond}\n"
-            f"Otomatik satıldı {trade.shares:.2f} @ {trade.price:.2f} {ac} (US equity quote often USD){pnl}"
+            f"🔴 <b>{html.escape(ticker)} · İNVALİDASYON</b>\n"
+            f"Koşul: {html.escape(cond)}\n"
+            f"Otomatik satıldı <code>{trade.shares:.2f}</code> @ <b>{trade.price:.2f} {ac}</b>"
+            f"{html.escape(pnl)}"
         )
         for uid in allowed:
             try:
-                await app.bot.send_message(chat_id=uid, text=msg)
+                await app.bot.send_message(chat_id=uid, text=msg, parse_mode=ParseMode.HTML)
             except Exception:
                 pass
 
@@ -1448,58 +1460,67 @@ Return JSON decisions array.
         if not is_emergency and event_type in ("PREMARKET", "TICK"):
             clk = _paper_agent_clock_header(self.deps.settings, with_seconds=False)
             parts = [
-                f"🤖 AI BROKER | {event_type} | {clk}",
-                "⏸ Pre-market / between-event — no broker orders (OPEN / MIDDAY / CLOSE ET only).",
-                "Full cycle → Supabase daily_reports · `/paper log`.",
+                f"🤖 <b>AI Broker</b> · <code>{html.escape(event_type)}</code> · {html.escape(clk)}",
+                "⏸ <i>Pre-market / between-event</i> — no broker orders (OPEN / MIDDAY / CLOSE ET only).",
+                "Full cycle → Supabase <code>daily_reports</code> · <code>/paper log</code>",
             ]
             if decisions:
-                parts.append("Snapshot (max 3):")
+                parts.append("<b>Snapshot (max 3)</b>")
                 for d in decisions[:3]:
                     t = str(d.get("ticker", "")).upper().strip()
                     a = str(d.get("action", "")).upper().strip()
-                    parts.append(f"• {t} | {a}")
+                    parts.append(f"• <b>{html.escape(t)}</b> · <code>{html.escape(a)}</code>")
             else:
                 parts.append("(No decision rows.)")
             msg = "\n".join(parts)
             for uid in allowed:
                 try:
-                    await app.bot.send_message(chat_id=uid, text=msg)
+                    await app.bot.send_message(chat_id=uid, text=msg, parse_mode=ParseMode.HTML)
                 except Exception:
                     pass
             return
 
         # Keep feed compact.
-        head = f"🤖 AI BROKER | {event_type} | {_paper_agent_clock_header(self.deps.settings, with_seconds=False)}"
+        head = (
+            f"🤖 <b>AI Broker</b> · <code>{html.escape(event_type)}</code> · "
+            f"{html.escape(_paper_agent_clock_header(self.deps.settings, with_seconds=False))}"
+        )
         if is_emergency:
-            head = f"🚨 ACİL | {event_type} | {_paper_agent_clock_header(self.deps.settings, with_seconds=True)}"
+            head = (
+                f"🚨 <b>ACİL</b> · <code>{html.escape(event_type)}</code> · "
+                f"{html.escape(_paper_agent_clock_header(self.deps.settings, with_seconds=True))}"
+            )
             extra: list[str] = []
             ctx = emergency_context or {}
             score = ctx.get("impact_score")
             sent = str(ctx.get("sentiment", "") or "").upper()
             if score is not None:
                 urg = "HIGH" if float(score) >= 8 else ("MED" if float(score) >= 6 else "LOW")
-                extra.append(f"⚡ Aciliyet: {urg} | Etki: {score}/10 {sent}".strip())
+                extra.append(
+                    f"⚡ <b>Aciliyet</b>: {html.escape(urg)} · "
+                    f"<b>Etki</b>: {html.escape(str(score))}/10 {html.escape(sent)}".strip()
+                )
             snippet = str(ctx.get("post_text", "") or "").strip().replace("\n", " ")
             if snippet and len(snippet) > 160:
                 snippet = snippet[:160] + "…"
             if snippet:
-                extra.append(f"📝 \"{snippet}\"")
+                extra.append(f"📝 \"{html.escape(snippet)}\"")
             img = ctx.get("image_analysis")
             if img and str(img).strip():
                 ia = str(img).strip().replace("\n", " ")
                 if len(ia) > 120:
                     ia = ia[:120] + "…"
-                extra.append(f"📷 {ia}")
+                extra.append(f"📷 {html.escape(ia)}")
             head = head + ("\n" + "\n".join(extra) if extra else "")
 
         sub: list[str] = []
         if nav_summary_line:
-            sub.append(nav_summary_line[:350] + ("…" if len(nav_summary_line) > 350 else ""))
+            sub.append(html.escape(nav_summary_line[:350] + ("…" if len(nav_summary_line) > 350 else "")))
         if macro_snippet:
             m = macro_snippet.replace("\n", " ").strip()
             if len(m) > 280:
                 m = m[:280] + "…"
-            sub.append(f"📊 Macro: {m}")
+            sub.append(f"📊 <b>Macro</b>: {html.escape(m)}")
         if sub:
             head = head + "\n" + "—" * 24 + "\n" + "\n".join(sub)
 
@@ -1517,9 +1538,12 @@ Return JSON decisions array.
                     hyp = hyp[:140] + "…"
                 conf_s = f"{float(conf):.2f}" if conf is not None else "N/A"
                 edge_s = f" | {edge}" if edge else ""
-                lines.append(f"{t} | {a} | conf={conf_s}{edge_s}")
+                lines.append(
+                    f"<b>{html.escape(t)}</b> · <code>{html.escape(a)}</code> · "
+                    f"conf=<code>{html.escape(conf_s)}</code>{html.escape(edge_s)}"
+                )
                 if hyp:
-                    lines.append(f"  {hyp}")
+                    lines.append(f"  {html.escape(hyp)}")
             try:
                 nav_now, cash_now, _ = await self._estimate_nav_mtm()
                 start = float(self.deps.settings.paper_starting_nav_usd)
@@ -1527,8 +1551,8 @@ Return JSON decisions array.
                 ac = (account_currency or "USD").upper()[:3]
                 lines.append("—" * 24)
                 lines.append(
-                    f"📊 NAV ~{nav_now:,.0f} {ac} ({ret_pct:+.1f}% vs {start:,.0f} {ac} start) | "
-                    f"Cash {cash_now:,.0f} {ac}"
+                    f"📊 <b>NAV</b> ~{nav_now:,.0f} {ac} ({ret_pct:+.1f}% vs {start:,.0f} {ac} start) · "
+                    f"<b>Cash</b> {cash_now:,.0f} {ac}"
                 )
             except Exception:
                 pass
@@ -1536,7 +1560,7 @@ Return JSON decisions array.
 
         for uid in allowed:
             try:
-                await app.bot.send_message(chat_id=uid, text=msg)
+                await app.bot.send_message(chat_id=uid, text=msg, parse_mode=ParseMode.HTML)
             except Exception:
                 # Don't spam logs for transient errors.
                 pass
