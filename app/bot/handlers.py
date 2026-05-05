@@ -79,18 +79,26 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     allowed = context.bot_data.get("allowed_ids", set())
     if not _check_user(update, allowed):
         return
+    body = "\n".join(
+        [
+            "<b>🤖 AI Broker — otonom paper broker</b>",
+            "T212 demo'ya gerçek emir akıtır, kararları kendisi verir, sana profesyonel bildirim atar.",
+            "",
+            "<b>Hızlı başlangıç</b>",
+            "• <code>/portfolio</code> — T212 hesap özeti + açık pozisyonlar",
+            "• <code>/paper</code> — PaperAgent durumu (NAV, son cycle, açık trade'ler)",
+            "• <code>/analyze AAPL</code> — anlık teknik + AI tezi",
+            "• <code>/runpaper</code> — manuel cycle tetikle",
+            "",
+            "📖 <b>Tüm komutlar</b>: <code>/help</code>",
+            "💬 <b>Sohbet</b>: komutla başlamayan her mesaj broker bağlamıyla cevaplanır "
+            "(örn. \"AAPL'de neden BUY dedin?\").",
+        ]
+    )
     await _send_long(
         update,
-        "🤖 *AI Broker — otonom paper broker*\n"
-        "T212 demo'ya gerçek emir akıtır, kararları kendisi verir, sana profesyonel bildirim atar.\n\n"
-        "Hızlı başlangıç:\n"
-        "• `/portfolio` — T212 hesap özeti + açık pozisyonlar\n"
-        "• `/paper` — PaperAgent durumu (NAV, son cycle, açık trade'ler)\n"
-        "• `/analyze AAPL` — anlık teknik + AI tezi\n"
-        "• `/runpaper` — manuel cycle tetikle\n\n"
-        "📖 *Tüm komutlar*: `/help`\n"
-        "💬 *Sohbet*: komutla başlamayan her mesaj broker bağlamıyla cevaplanır "
-        "(örn. \"AAPL'de neden BUY dedin?\").",
+        body,
+        parse_mode=ParseMode.HTML,
     )
 
 

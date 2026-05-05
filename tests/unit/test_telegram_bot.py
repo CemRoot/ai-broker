@@ -139,6 +139,7 @@ async def test_start_handler_points_to_help() -> None:
     blob = "\n".join(sent)
     # Welcome should link to the new categorized command reference.
     assert "/help" in blob
+    assert update.effective_chat.send_message.call_args.kwargs.get("parse_mode") == ParseMode.HTML
     # Quick-start basics should still be discoverable from /start alone.
     assert "/portfolio" in blob and "/paper" in blob
 

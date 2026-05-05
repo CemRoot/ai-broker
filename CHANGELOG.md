@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`2026-05-05T12:31:00+01:00`:** **Telegram `/start` mesajı HTML standardına geçirildi.** `app/bot/handlers.py` içinde `start_handler` artık `parse_mode=HTML` ile `<b>` ve `<code>` kullanıyor; ham `*...*` Markdown karakterleri kullanıcıya görünmüyor. Birim güncelleme: `tests/unit/test_telegram_bot.py` (`/start` için `ParseMode.HTML` assert).
+
 - **`2026-05-05T12:08:00+01:00`:** **T212 shared read-cache + adaptive throttling (client-level):** `app/services/t212/client.py` içinde `/equity/account/summary` (TTL 60s) ve `/equity/positions` (TTL 30s) için **shared in-memory cache** + per-key lock (single-flight) eklendi; `MirrorPoller`, `public_live`, `PaperAgent` aynı client metotlarını kullandığı için aynı cache havuzunu paylaşır. Order/cancel çağrılarında read-cache invalidation var (placement cache bypass). `x-ratelimit-remaining/reset/limit` header’ları okunuyor; `remaining < 5` durumunda global adaptive backoff uygulanıyor, `throttled_count` ve cache hit/miss logları düşülüyor. `.env.example` + `app/core/config.py`: `PUBLIC_LIVE_T212_CACHE_TTL_SEC` (varsayılan 60). Birim: `tests/unit/test_t212_orders.py` cache hit, invalidation, adaptive backoff kapsaması.
 
 - **`2026-05-05T11:40:00+01:00`:** **`GET /public/live` T212 cache ayarı env’ye taşındı:** `PUBLIC_LIVE_T212_CACHE_TTL_SEC` (varsayılan `60`) eklendi (`app/core/config.py`, `.env.example`). `app/services/public_live_snapshot.py` artık T212 account/positions fetch cache TTL’ini settings’ten okuyor; sık Cloudflare/health trafiğinde T212 `/equity/account/summary` 429 baskısını azaltmak için runtime ayarı veriyor.
