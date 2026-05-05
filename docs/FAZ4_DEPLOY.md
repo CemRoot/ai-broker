@@ -63,7 +63,8 @@ curl -s http://127.0.0.1:8000/health
 - **Üretim:** `TELEGRAM_WEBHOOK_URL` **ve** `TELEGRAM_WEBHOOK_SECRET` birlikte dolu olmalı; uygulama bu durumda **yalnızca webhook** kullanır, polling başlatmaz (çift tüketici riskini azaltır).
 - `TELEGRAM_WEBHOOK_URL` dolu ama **secret boş** ise: uygulama **polling’e düşmez** (`/health` içinde `telegram.mode`: `webhook_incomplete`); secret’ı doldurup konteyneri **`--force-recreate`** ile yenileyin.
 - `.env` / webhook değişikliğinden sonra: `docker compose up -d --build --force-recreate ai-broker` (bkz. yukarıdaki “`.env` değişince” notu). Yalnız `docker restart` secret/URL güncellemesini yansıtmayabilir.
-- Truth Social **403 / “Just a moment”** (Cloudflare): veri merkezi egress; Trump akışı bu IP’den kalıcı çalışmayabilir — `TRUMP_MONITOR_ENABLED=false` veya harici cron / farklı ağ seçenekleri için CTO ile hizalanın.
+- Trump akışı için varsayılan kaynak artık **CNN arşivi**: `TRUMP_STREAM_SOURCE=cnn_archive` (`https://ix.cnn.io/data/truth-social/truth_archive.json`). Bu kaynak auth istemez ve datacenter IP/WAF 403 sorununa takılmaz.
+- CNN geçişi sonrası `POST /internal/trump/pull` beklenen yanıtı: `{"fetched": N, "new_posts": M, "error_status": 200}`; `error_status: -1` artık normal değildir.
 
 ## OCI ARM (ör. 4 vCPU / 24GB)
 

@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     public_dashboard_cors_origins: str = ""
 
     # ── Faz 1.5-d — Truth Social / Trump monitor ────────────────────
+    #: Trump source selector: ``cnn_archive`` (default, no auth/IP block issues).
+    trump_stream_source: str = "cnn_archive"
     truth_social_email: str = ""
     truth_social_password: str = ""
     truth_social_access_token: str = ""

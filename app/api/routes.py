@@ -296,12 +296,11 @@ async def internal_usage(request: Request):
     dependencies=[Depends(require_internal_api_key)],
 )
 async def internal_trump_pull(request: Request, limit: int = 10):
-    """REST polling fallback for Truth Social posts.
+    """Manual pull for Trump posts (CNN archive source).
 
-    Designed for the GitHub Actions cron worker (``.github/workflows/trump-pull-cron.yml``)
-    so we don't depend on the WebSocket user-stream — which is silent unless the
-    bot account follows ``@realDonaldTrump``. Returns ``{fetched, new_posts, error_status}``.
-    Each new status is processed by the same impact LLM + Supabase write +
+    Designed for the GitHub Actions cron worker (``.github/workflows/trump-pull-cron.yml``).
+    Returns ``{fetched, new_posts, error_status}``.
+    Each new post is processed by the same impact LLM + Supabase write +
     Telegram alert + emergency PaperAgent path as the live stream.
     """
     monitor = getattr(request.app.state, "trump_monitor", None)

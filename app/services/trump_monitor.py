@@ -1,15 +1,9 @@
 """
-Faz 1.5-d — Truth Social (Mastodon-compatible) Trump post monitor.
+Faz 1.5-d — Trump monitor (CNN Truth archive source).
 
-Streams the authenticated user's home timeline via SSE or WebSocket (Truth fork dependent),
-filters posts by configured Trump account id, runs Groq impact + optional vision analysis,
-logs rows (Supabase insert in Faz 2), and alerts Telegram when impact exceeds threshold.
-
-Requires ``TRUTH_SOCIAL_ACCESS_TOKEN`` (Bearer). Email/password are reserved for future OAuth;
-token must be obtained via Truth Social / Mastodon OAuth app flow.
-
-The ``stream=user`` timeline includes accounts the token user **follows** — follow @realDonaldTrump
-from that account or posts may not appear.
+Fetches ``https://ix.cnn.io/data/truth-social/truth_archive.json`` on an interval,
+analyzes post text/media with existing Groq pipelines, writes rows to DB, and sends
+Telegram alerts for high-impact posts.
 """
 
 from __future__ import annotations
@@ -18,7 +12,6 @@ import asyncio
 import json
 import random
 import re
-import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -33,6 +26,7 @@ if TYPE_CHECKING:
     from telegram.ext import Application
 
 log = get_logger("trump_monitor")
+CNN_TRUTH_ARCHIVE_URL = "https://ix.cnn.io/data/truth-social/truth_archive.json"
 
 IMPACT_SYSTEM = """You are a markets-focused assistant. Given a social post by a political figure, respond with ONE JSON object only (no markdown), keys:
 {"impact_score": <float 1-10>, "sentiment": "bullish"|"bearish"|"neutral", "affected_sectors": [<strings>], "affected_tickers": [<uppercase tickers or empty>], "reasoning": <short string>}
@@ -107,117 +101,37 @@ class TrumpMonitor:
         self._retriever = retriever
         self._paper_agent = None
         self._seen_ids: set[str] = set()
-        self._trump_account_id: str | None = None
+        self._last_processed_post_id: str | None = None
         self._backoff = 5.0
 
-    @property
-    def _api_base(self) -> str:
-        return f"{self._settings.truth_social_base_url.rstrip('/')}/api/v1"
-
-    def _auth_headers(self) -> dict[str, str]:
-        tok = self._settings.truth_social_access_token.strip()
-        return {"Authorization": f"Bearer {tok}"}
-
-    def _truth_user_agent_headers(self) -> dict[str, str]:
-        # Cloudflare/WAF often blocks default Python clients; mimic a modern browser.
-        return {
-            "Accept": "application/json",
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
-        }
-
-    async def _truth_get_json(
-        self,
-        path: str,
-        *,
-        params: dict[str, Any] | None = None,
-        accept: str = "application/json",
-        timeout_s: float = 20.0,
-    ) -> tuple[int, dict[str, Any] | None, str]:
-        """
-        Cloudflare-aware JSON GET for Truth Social endpoints.
-
-        Returns: (status_code, json_dict_or_none, raw_text_prefix)
-        """
-        url = f"{self._api_base}{path}"
-        headers = {
-            **self._truth_user_agent_headers(),
-            **self._auth_headers(),
-            "Accept": accept,
-        }
-
-        # Prefer curl_cffi (curl-impersonate) to bypass WAF.
-        try:
-            from curl_cffi import requests as crequests  # type: ignore
-
-            def _do() -> tuple[int, dict[str, Any] | None, str]:
-                r = crequests.get(
-                    url,
-                    params=params,
-                    headers=headers,
-                    timeout=timeout_s,
-                    impersonate="chrome",
-                )
-                text = (r.text or "")[:500]
-                data: dict[str, Any] | None = None
-                try:
-                    data = r.json()
-                except Exception:
-                    data = None
-                return int(r.status_code), data, text
-
-            return await asyncio.to_thread(_do)
-        except Exception:
-            pass
-
-        # Fallback: httpx (may be blocked by Cloudflare on some endpoints).
+    async def _fetch_cnn_archive(self) -> tuple[int, list[dict[str, Any]], str]:
+        """Fetch CNN Truth archive and normalize output to a post list."""
         if not self._http:
-            return 0, None, "http client unavailable"
+            return 0, [], "http client unavailable"
         try:
-            r = await self._http.get(
-                url,
-                params=params,
-                headers=headers,
-                timeout=httpx.Timeout(timeout_s),
+            resp = await self._http.get(
+                CNN_TRUTH_ARCHIVE_URL,
+                timeout=httpx.Timeout(20.0, connect=5.0),
             )
-            text = (r.text or "")[:500]
-            data: dict[str, Any] | None = None
-            try:
-                data = r.json()
-            except Exception:
-                data = None
-            return int(r.status_code), data, text
+            code = int(resp.status_code)
+            text = (resp.text or "")[:500]
+            if code != 200:
+                return code, [], text
+            payload = resp.json()
         except Exception as exc:
-            return 0, None, str(exc)[:500]
+            return 0, [], str(exc)[:500]
 
-    async def connect(self) -> None:
-        """Resolve Trump account id for filtering (REST lookup)."""
-        tok = self._settings.truth_social_access_token.strip()
-        if not tok:
-            log.warning("TrumpMonitor: TRUTH_SOCIAL_ACCESS_TOKEN empty — streaming disabled")
-            return
-        aid = await self._lookup_trump_account_id()
-        if aid:
-            self._trump_account_id = aid
-            log.info("TrumpMonitor: resolved Trump account id=%s", aid)
-        else:
-            log.warning(
-                "TrumpMonitor: could not resolve account %r — posts may not filter correctly",
-                self._settings.trump_truth_account_username,
-            )
-
-    async def _lookup_trump_account_id(self) -> str | None:
-        status, data, text = await self._truth_get_json(
-            "/accounts/lookup",
-            params={"acct": self._settings.trump_truth_account_username.strip()},
-        )
-        if status != 200 or not isinstance(data, dict):
-            log.warning("TrumpMonitor lookup HTTP %s: %s", status, text[:200])
-            return None
-        return str(data.get("id", "")) or None
+        if isinstance(payload, list):
+            posts = [p for p in payload if isinstance(p, dict)]
+            return 200, posts, ""
+        if isinstance(payload, dict):
+            # endpoint may return either one post or wrapped list
+            if isinstance(payload.get("posts"), list):
+                posts = [p for p in payload["posts"] if isinstance(p, dict)]
+                return 200, posts, ""
+            if payload.get("id"):
+                return 200, [payload], ""
+        return 200, [], ""
 
     async def on_trump_post(self, status: dict[str, Any]) -> None:
         """Handle one normalized Mastodon Status dict attributed to Trump."""
@@ -292,44 +206,104 @@ class TrumpMonitor:
         """Attach a PaperAgent instance (Faz 3f)."""
         self._paper_agent = paper_agent
 
-    async def pull_recent_statuses(self, *, limit: int = 10) -> dict[str, int]:
-        """REST polling fallback used by ``POST /internal/trump/pull`` and the
-        GitHub Actions cron worker.
+    async def _load_last_processed_post_id(self) -> str | None:
+        """Best-effort seed from DB so restarts don't reprocess old posts."""
+        if not self._db or not self._db.get_pool():
+            return None
+        try:
+            query = """
+            SELECT post_id
+            FROM trump_posts
+            ORDER BY posted_at DESC
+            LIMIT 1
+            """
+            async with self._db.get_pool().acquire() as conn:
+                row = await conn.fetchrow(query)
+            if row and row.get("post_id"):
+                return str(row["post_id"])
+        except Exception as exc:
+            log.warning("TrumpMonitor: failed loading last post_id from DB: %s", exc)
+        return None
 
-        The ``stream=user`` WebSocket only carries posts authored by accounts the
-        token user follows. If the operator has not followed ``@realDonaldTrump``
-        from the bot account, posts never arrive on the live stream — this helper
-        polls the public statuses endpoint and feeds each new status through the
-        same ``on_trump_post`` pipeline (impact LLM + Supabase write + Telegram).
+    @staticmethod
+    def _id_to_int(post_id: str) -> int:
+        try:
+            return int(post_id.strip())
+        except Exception:
+            return 0
 
-        Returns a small summary dict suitable for HTTP responses and CI logs.
-        """
-        if not self._trump_account_id:
-            await self.connect()
-        aid = self._trump_account_id
-        if not aid:
-            return {"fetched": 0, "new_posts": 0, "error_status": -1}
-        status, data, text = await self._truth_get_json(
-            f"/accounts/{aid}/statuses",
-            params={"limit": int(max(1, min(40, limit))), "exclude_replies": "true"},
-        )
-        if status != 200 or not isinstance(data, list):
-            log.warning("TrumpMonitor pull HTTP %s: %s", status, text[:160])
-            return {"fetched": 0, "new_posts": 0, "error_status": status}
-        new_count = 0
-        for st in data:
-            if not isinstance(st, dict):
+    @staticmethod
+    def _cnn_media_split(media: list[str]) -> tuple[list[str], list[str]]:
+        images: list[str] = []
+        videos: list[str] = []
+        for raw in media:
+            u = str(raw or "").strip()
+            if not u:
                 continue
-            sid = str(st.get("id") or "")
+            ul = u.lower().split("?", 1)[0]
+            if ul.endswith((".jpg", ".jpeg", ".png", ".webp")):
+                images.append(u)
+            elif ul.endswith((".mp4", ".mov")):
+                videos.append(u)
+        return images, videos
+
+    @staticmethod
+    def _cnn_to_status(post: dict[str, Any], image_urls: list[str]) -> dict[str, Any]:
+        return {
+            "id": str(post.get("id") or ""),
+            "created_at": str(post.get("created_at") or ""),
+            "content": str(post.get("content") or ""),
+            "media_attachments": [{"type": "image", "url": u} for u in image_urls],
+        }
+
+    async def pull_recent_statuses(self, *, limit: int = 10) -> dict[str, int]:
+        """Poll CNN archive and feed new entries through existing analysis pipeline."""
+        if self._last_processed_post_id is None:
+            self._last_processed_post_id = await self._load_last_processed_post_id()
+
+        status, posts, text = await self._fetch_cnn_archive()
+        if status != 200:
+            log.warning("TrumpMonitor CNN archive HTTP %s: %s", status, text[:160])
+            return {"fetched": 0, "new_posts": 0, "error_status": status}
+
+        # Keep most recent entries first if endpoint returns long arrays.
+        posts = posts[: int(max(1, min(200, limit)))] if posts else []
+        new_count = 0
+        last_id_int = self._id_to_int(self._last_processed_post_id or "")
+
+        for post in reversed(posts):
+            sid = str(post.get("id") or "").strip()
+            if not sid:
+                continue
+            sid_int = self._id_to_int(sid)
+            if sid in self._seen_ids:
+                continue
+            if last_id_int and sid_int and sid_int <= last_id_int:
+                continue
+
+            content = str(post.get("content") or "").strip()
+            media = post.get("media") if isinstance(post.get("media"), list) else []
+            image_urls, video_urls = self._cnn_media_split([str(x) for x in media])
+
+            for vu in video_urls:
+                log.info("TrumpMonitor CNN: skipping video media url=%s", vu[:180])
+
+            if not content and not image_urls:
+                continue
+
+            normalized = self._cnn_to_status(post, image_urls)
             before = sid in self._seen_ids
             try:
-                await self.on_trump_post(st)
+                await self.on_trump_post(normalized)
             except Exception as exc:
-                log.warning("TrumpMonitor pull on_trump_post error: %s", exc)
+                log.warning("TrumpMonitor CNN on_trump_post error: %s", exc)
                 continue
             if not before:
                 new_count += 1
-        return {"fetched": len(data), "new_posts": new_count, "error_status": status}
+                self._last_processed_post_id = sid
+                if sid_int:
+                    last_id_int = sid_int
+        return {"fetched": len(posts), "new_posts": new_count, "error_status": 200}
 
     def _status_plain_text(self, status: dict[str, Any]) -> str:
         """Plain text for DB + LLM. Boosts/reblogs often have empty top-level ``content``."""
@@ -487,229 +461,16 @@ class TrumpMonitor:
             except Exception as exc:
                 log.error("TrumpMonitor Telegram send failed uid=%s: %s", uid, exc)
 
-    def _should_process_status(self, status: dict[str, Any]) -> bool:
-        acct = status.get("account") or {}
-        aid = str(acct.get("id", ""))
-        uname = str(acct.get("username", "")).lower()
-        target = self._settings.trump_truth_account_username.strip().lower()
-        if self._trump_account_id and aid == self._trump_account_id:
-            return True
-        if target and uname == target.replace("@", "").split("@")[0]:
-            return True
-        return False
-
-    async def _handle_sse_event(self, event_name: str | None, data_blob: str) -> None:
-        ev = (event_name or "update").strip().lower()
-        if ev in ("heartbeat", "ping"):
-            return
-        if ev != "update":
-            return
-        try:
-            status = json.loads(data_blob)
-        except json.JSONDecodeError:
-            return
-        if isinstance(status, dict) and self._should_process_status(status):
-            await self.on_trump_post(status)
-
-    async def _dispatch_ws_message(self, message: str) -> None:
-        """Parse Mastodon-compatible WebSocket JSON frame."""
-        try:
-            obj = json.loads(message)
-        except json.JSONDecodeError:
-            return
-        payload = obj.get("payload")
-        if isinstance(payload, str):
-            try:
-                inner = json.loads(payload)
-            except json.JSONDecodeError:
-                return
-            status = inner if isinstance(inner, dict) else None
-        elif isinstance(payload, dict):
-            status = payload
-        else:
-            return
-        if status and isinstance(status, dict) and self._should_process_status(status):
-            await self.on_trump_post(status)
-
-    async def _consume_sse(self) -> None:
-        tok = self._settings.truth_social_access_token.strip()
-        if not tok:
-            await asyncio.sleep(60)
-            return
-
-        url = f"{self._settings.truth_social_base_url.rstrip('/')}/api/v1/streaming"
-        headers = {
-            **self._auth_headers(),
-            **self._truth_user_agent_headers(),
-            "Accept": "text/event-stream",
-        }
-        log.info("TrumpMonitor: SSE connect %s stream=user", url)
-
-        # Prefer curl_cffi for SSE to bypass Cloudflare.
-        try:
-            from curl_cffi import requests as crequests  # type: ignore
-
-            q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=2000)
-            stop = threading.Event()
-            loop = asyncio.get_running_loop()
-
-            def _pump() -> None:
-                try:
-                    with crequests.Session() as s:
-                        r = s.get(
-                            url,
-                            params={"stream": "user"},
-                            headers=headers,
-                            stream=True,
-                            timeout=60,
-                            impersonate="chrome",
-                        )
-                        try:
-                            if int(getattr(r, "status_code", 0)) != 200:
-                                try:
-                                    body = (r.text or "")[:200]
-                                except Exception:
-                                    body = ""
-                                loop.call_soon_threadsafe(q.put_nowait, None)
-                                log.warning("TrumpMonitor SSE HTTP %s: %s", r.status_code, body)
-                                return
-                            for raw in r.iter_lines():
-                                if stop.is_set():
-                                    break
-                                if raw is None:
-                                    continue
-                                line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
-                                def _offer(v: str) -> None:
-                                    if q.full():
-                                        # Drop lines under sustained backpressure rather than blocking the pump.
-                                        return
-                                    q.put_nowait(v)
-
-                                loop.call_soon_threadsafe(_offer, line)
-                        finally:
-                            try:
-                                r.close()
-                            except Exception:
-                                pass
-                except Exception as exc:
-                    log.warning("TrumpMonitor SSE (curl_cffi) failed: %s", exc)
-                    try:
-                        loop.call_soon_threadsafe(q.put_nowait, None)
-                    except Exception:
-                        pass
-
-            t = threading.Thread(target=_pump, daemon=True)
-            t.start()
-
-            event_name: str | None = None
-            data_lines: list[str] = []
-            while True:
-                line = await q.get()
-                if line is None:
-                    break
-                if line.startswith("event:"):
-                    event_name = line[6:].strip()
-                    continue
-                if line.startswith("data:"):
-                    data_lines.append(line[5:].lstrip())
-                    continue
-                if line == "" and data_lines:
-                    blob = "\n".join(data_lines)
-                    data_lines.clear()
-                    await self._handle_sse_event(event_name, blob)
-                    event_name = None
-            stop.set()
-            return
-        except Exception:
-            pass
-
-        # Fallback to httpx streaming (may be blocked by Cloudflare).
-        if not self._http:
-            await asyncio.sleep(60)
-            return
-        async with self._http.stream(
-            "GET",
-            url,
-            params={"stream": "user"},
-            headers=headers,
-            timeout=httpx.Timeout(None, connect=30.0),
-        ) as resp:
-            resp.raise_for_status()
-            event_name: str | None = None
-            data_lines: list[str] = []
-
-            async for raw_line in resp.aiter_lines():
-                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
-                if line is None:
-                    continue
-                if line.startswith("event:"):
-                    event_name = line[6:].strip()
-                    continue
-                if line.startswith("data:"):
-                    data_lines.append(line[5:].lstrip())
-                    continue
-                if line == "" and data_lines:
-                    blob = "\n".join(data_lines)
-                    data_lines.clear()
-                    await self._handle_sse_event(event_name, blob)
-                    event_name = None
-
-    async def _consume_websocket(self) -> None:
-        try:
-            from curl_cffi.requests import AsyncSession
-        except ImportError:
-            log.warning("TrumpMonitor WebSocket requires curl_cffi")
-            await asyncio.sleep(60)
-            return
-
-        tok = self._settings.truth_social_access_token.strip()
-        if not tok:
-            await asyncio.sleep(60)
-            return
-
-        host = self._settings.truth_social_base_url.rstrip("/").replace("https://", "").replace("http://", "")
-        uri = f"wss://{host}/api/v1/streaming?stream=user"
-        log.info("TrumpMonitor: WebSocket connect (user stream) via curl_cffi")
-
-        headers = {"Authorization": f"Bearer {tok}"}
-        try:
-            async with AsyncSession(impersonate="chrome", timeout=60.0) as session:
-                async with session.ws_connect(uri, headers=headers) as ws:
-                    while True:
-                        message = await ws.recv()
-                        if isinstance(message, tuple):
-                            # curl_cffi ws.recv() returns a tuple (content, opcode)
-                            message = message[0]
-                        if isinstance(message, bytes):
-                            message = message.decode("utf-8", errors="replace")
-                        await self._dispatch_ws_message(message)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            # Re-raise so run_with_reconnect's outer except applies exponential
-            # backoff; otherwise a Cloudflare 403 would loop instantly and flood
-            # logs with hundreds of WARNINGs per second.
-            log.warning("TrumpMonitor WebSocket failed: %s", exc)
-            raise
-
     async def run_with_reconnect(self) -> None:
-        """Long-running loop with exponential backoff + jitter."""
-        await self.connect()
+        """Long-running CNN archive polling loop with exponential backoff + jitter."""
 
         while True:
             try:
-                if not self._settings.truth_social_access_token.strip():
-                    log.warning(
-                        "TrumpMonitor idle — set TRUTH_SOCIAL_ACCESS_TOKEN (email/password OAuth not automated yet)"
-                    )
-                    await asyncio.sleep(300)
-                    continue
-
-                transport = self._settings.truth_social_stream_transport.strip().lower()
-                if transport == "websocket":
-                    await self._consume_websocket()
-                else:
-                    await self._consume_sse()
+                source = (self._settings.trump_stream_source or "cnn_archive").strip().lower()
+                if source != "cnn_archive":
+                    log.warning("TrumpMonitor: unknown TRUMP_STREAM_SOURCE=%r, using cnn_archive", source)
+                await self.pull_recent_statuses(limit=40)
+                await asyncio.sleep(max(15, int(self._settings.trump_pull_interval_sec or 60)))
 
                 self._backoff = 5.0
 
