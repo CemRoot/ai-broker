@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     #: Adaptive backoff trigger: when x-ratelimit-remaining drops below this
     #: value, client enters a temporary global backoff window.
     t212_adaptive_remaining_threshold: int = 10
+    #: Prime equity instruments list at startup. Disable to reduce boot-time T212 load;
+    #: BUY flow can still refresh the list on demand.
+    t212_prime_instruments_on_startup: bool = False
+    #: Cooldown for repeating adaptive-backoff warning logs (seconds).
+    t212_backoff_log_cooldown_sec: float = 30.0
+    #: Cooldown for repeating low-remaining warning logs (seconds).
+    t212_remaining_log_cooldown_sec: float = 30.0
 
     # ── LLM — Groq (primary) ────────────────────────────────────────
     groq_api_key: str = ""

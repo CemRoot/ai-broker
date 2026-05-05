@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`2026-05-05T16:56:00+01:00`:** **T212 stability mode (rate-limit baskısı için).** `app/main.py` startup instruments prime artık ayarlanabilir (`T212_PRIME_INSTRUMENTS_ON_STARTUP`, varsayılan `false`) — boot sırasında gereksiz T212 yükü azaltılır. `app/services/t212/client.py` adaptive backoff / low-remaining warning logları cooldown’lu hale getirildi (`T212_BACKOFF_LOG_COOLDOWN_SEC`, `T212_REMAINING_LOG_COOLDOWN_SEC`, varsayılan 30s) ve log flood sakinleşti. `.env.example` yeni T212 stability değişkenleriyle güncellendi.
+
 - **`2026-05-05T16:49:00+01:00`:** **Groq 429 güvenli modu (fallback zinciri kırılmasın).** `app/services/llm/tool_calling.py` içinde `analyze_with_tools` artık Groq hatasında `429 / rate-limit` durumunu ayrı yakalar; bu durumda Ollama fallback’e zorlamadan güvenli `decisions=[]` (no-trade) döner ve PaperAgent döngüsünün RAM kaynaklı ollama çöküşüyle tamamen kırılmasını engeller. Amaç: servis canlı kalsın, trade execution yanlışlıkla tetiklenmesin.
 
 - **`2026-05-05T12:56:00+01:00`:** **Telegram otomatik kartları profesyonel HTML formatına alındı (PaperAgent + Trump alarmı).** `app/agents/paper_agent.py` içinde PREMARKET/TICK canlı feed, acil feed, per-trade BUY/SELL kartı ve invalidation SELL mesajları artık `parse_mode=HTML` ile `<b>/<code>/<i>` kullanıyor; ticker/action/guardrail/NAV blokları daha okunabilir tek-tip kart düzenine taşındı. `app/services/trump_monitor.py` alarm mesajı da HTML karta geçirildi (score/sentiment/sectors/tickers/reasoning alanları). Dinamik metinler `html.escape` ile güvenli render edilir.

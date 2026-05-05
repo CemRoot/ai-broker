@@ -104,6 +104,14 @@ class T212Client:
         self._adaptive_remaining_threshold: int = max(
             1, int(getattr(settings, "t212_adaptive_remaining_threshold", 10) or 10)
         )
+        self._backoff_log_cooldown_sec: float = max(
+            0.0, float(getattr(settings, "t212_backoff_log_cooldown_sec", 30.0) or 0.0)
+        )
+        self._remaining_log_cooldown_sec: float = max(
+            0.0, float(getattr(settings, "t212_remaining_log_cooldown_sec", 30.0) or 0.0)
+        )
+        self._last_backoff_log_mono: float = 0.0
+        self._last_remaining_log_mono: float = 0.0
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -548,11 +556,16 @@ class T212Client:
             if now < self._global_backoff_until_mono:
                 wait = self._global_backoff_until_mono - now
                 self._throttled_count += 1
-                log.warning(
-                    "T212 adaptive backoff active — wait %.2fs (throttled_count=%d)",
-                    wait,
-                    self._throttled_count,
-                )
+                if (
+                    self._backoff_log_cooldown_sec <= 0
+                    or (now - self._last_backoff_log_mono) >= self._backoff_log_cooldown_sec
+                ):
+                    log.warning(
+                        "T212 adaptive backoff active — wait %.2fs (throttled_count=%d)",
+                        wait,
+                        self._throttled_count,
+                    )
+                    self._last_backoff_log_mono = now
                 await asyncio.sleep(wait)
                 now = time.monotonic()
             elapsed = now - self._last_request_at
@@ -603,13 +616,19 @@ class T212Client:
             if until > self._global_backoff_until_mono:
                 self._global_backoff_until_mono = until
             self._throttled_count += 1
-            log.warning(
-                "T212 remaining low (%d < %d) — adaptive backoff %.1fs (throttled_count=%d)",
-                remaining,
-                self._adaptive_remaining_threshold,
-                reset_in,
-                self._throttled_count,
-            )
+            now_mono = time.monotonic()
+            if (
+                self._remaining_log_cooldown_sec <= 0
+                or (now_mono - self._last_remaining_log_mono) >= self._remaining_log_cooldown_sec
+            ):
+                log.warning(
+                    "T212 remaining low (%d < %d) — adaptive backoff %.1fs (throttled_count=%d)",
+                    remaining,
+                    self._adaptive_remaining_threshold,
+                    reset_in,
+                    self._throttled_count,
+                )
+                self._last_remaining_log_mono = now_mono
 
     # ── Normalization helpers (defensive client-side validation) ────
 

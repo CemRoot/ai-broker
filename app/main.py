@@ -90,8 +90,12 @@ async def lifespan(app: FastAPI):
         log.info("Startup jitter (%s): sleeping %.1fs", label, delay)
         await asyncio.sleep(delay)
 
-    if settings.paper_executes_on_t212 and (
+    if (
+        settings.paper_executes_on_t212
+        and bool(getattr(settings, "t212_prime_instruments_on_startup", False))
+        and (
         (settings.t212_demo_api_key or "").strip() and (settings.t212_demo_api_secret or "").strip()
+        )
     ):
         try:
             await _startup_jitter("t212_instruments_prime")
