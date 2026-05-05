@@ -15,6 +15,7 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -113,6 +114,44 @@ def _serialize_assistant_message(msg: Any) -> dict[str, Any]:
     return out
 
 
+def _estimate_payload_chars(messages: list[dict[str, Any]], tools: list[dict]) -> tuple[int, int]:
+    """Cheap payload size estimator for request diagnostics."""
+    try:
+        messages_chars = len(json.dumps(messages, ensure_ascii=False, default=str))
+    except Exception:
+        messages_chars = len(str(messages))
+    try:
+        tools_chars = len(json.dumps(tools, ensure_ascii=False, default=str))
+    except Exception:
+        tools_chars = len(str(tools))
+    return messages_chars, tools_chars
+
+
+def _error_detail(exc: Exception) -> str:
+    """Best-effort extraction of Groq error payload without leaking secrets."""
+    parts: list[str] = []
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status is not None:
+        parts.append(f"status={status}")
+    body = getattr(response, "text", None)
+    if body:
+        parts.append(f"body={str(body)[:700]}")
+    # some SDK errors expose parsed payload directly
+    data = getattr(exc, "body", None) or getattr(exc, "error", None)
+    if data:
+        if isinstance(data, Mapping):
+            try:
+                parts.append(f"payload={json.dumps(data, ensure_ascii=False)[:700]}")
+            except Exception:
+                parts.append(f"payload={str(data)[:700]}")
+        else:
+            parts.append(f"payload={str(data)[:700]}")
+    if not parts:
+        parts.append(str(exc)[:700])
+    return " | ".join(parts)
+
+
 async def analyze_with_tools(
     *,
     groq: GroqService | None,
@@ -136,6 +175,7 @@ async def analyze_with_tools(
     # ── Groq primary ────────────────────────────────────────────────
     if groq:
         t0 = time.perf_counter()
+        initial_messages_chars, tools_chars = _estimate_payload_chars(messages, tools)
         try:
             client = groq._get_client()  # reuse lazy client
             for i in range(max_iterations):
@@ -187,7 +227,18 @@ async def analyze_with_tools(
             )
         except Exception as exc:
             groq_failed = True
-            log.warning("Groq analyze_with_tools failed; falling back to Ollama: %s", exc)
+            final_messages_chars, _ = _estimate_payload_chars(messages, tools)
+            log.warning(
+                "Groq analyze_with_tools failed; fallback to Ollama | model=%s iters=%d "
+                "msg_chars_initial=%d msg_chars_final=%d tools_chars=%d tool_count=%d | %s",
+                groq.model,
+                len(messages),
+                initial_messages_chars,
+                final_messages_chars,
+                tools_chars,
+                len(tools),
+                _error_detail(exc),
+            )
             await fire_operator_alert(
                 category="LLM · Groq",
                 summary="analyze_with_tools: Groq failed — falling back to Ollama (no tool-calling on fallback path).",

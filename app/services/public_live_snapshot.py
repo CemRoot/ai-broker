@@ -71,7 +71,7 @@ def truncate(text: str, max_len: int) -> str:
     return t[: max_len - 1] + "…"
 
 
-async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]:
+async def _fetch_t212_account_cached(t212: Any, currency: str, ttl_sec: float) -> dict[str, Any]:
     """Return a cached T212 ``account+positions`` snapshot for the public dashboard.
 
     A ~30 s in-process cache absorbs concurrent ``/public/live`` callers and
@@ -81,7 +81,8 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
     """
     global _t212_cache, _t212_cache_at
     now = time.monotonic()
-    if _t212_cache is not None and (now - _t212_cache_at) < _T212_CACHE_TTL_SEC:
+    ttl = max(5.0, float(ttl_sec))
+    if _t212_cache is not None and (now - _t212_cache_at) < ttl:
         # Stamp ``cached_age_s`` so the dashboard can hint at staleness.
         cached = dict(_t212_cache)
         cached["cached_age_s"] = round(now - _t212_cache_at, 1)
@@ -90,7 +91,7 @@ async def _fetch_t212_account_cached(t212: Any, currency: str) -> dict[str, Any]
     async with _t212_cache_lock:
         # Re-check inside the lock to avoid a thundering herd.
         now = time.monotonic()
-        if _t212_cache is not None and (now - _t212_cache_at) < _T212_CACHE_TTL_SEC:
+        if _t212_cache is not None and (now - _t212_cache_at) < ttl:
             cached = dict(_t212_cache)
             cached["cached_age_s"] = round(now - _t212_cache_at, 1)
             return cached
@@ -489,7 +490,8 @@ async def _compute_public_live_snapshot(request: Request) -> dict[str, Any]:
 
     t212_account: dict[str, Any] | None = None
     if settings and getattr(settings, "paper_executes_on_t212", False) and t212 is not None:
-        t212_account = await _fetch_t212_account_cached(t212, currency)
+        ttl = float(getattr(settings, "public_live_t212_cache_ttl_sec", _T212_CACHE_TTL_SEC) or _T212_CACHE_TTL_SEC)
+        t212_account = await _fetch_t212_account_cached(t212, currency, ttl)
 
     nav_display = ledger_nav
     nav_display_source = "supabase_ledger"

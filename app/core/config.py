@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     public_dashboard_enabled: bool = False
     #: Comma-separated browser origins allowed to call ``GET /public/live`` (CORS). Empty = no extra CORS (same-origin ``/finance`` only).
     public_dashboard_cors_origins: str = ""
+    #: T212 cache TTL (seconds) for ``GET /public/live`` snapshot reads.
+    #: Lower values are fresher but increase risk of 429 on account summary endpoints.
+    public_live_t212_cache_ttl_sec: int = 60
 
     # ── Faz 1.5-d — Truth Social / Trump monitor ────────────────────
     #: Trump source selector: ``cnn_archive`` (default, no auth/IP block issues).
