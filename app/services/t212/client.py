@@ -101,6 +101,9 @@ class T212Client:
         self._read_cache_locks: dict[str, asyncio.Lock] = {}
         self._throttled_count: int = 0
         self._global_backoff_until_mono: float = 0.0
+        self._adaptive_remaining_threshold: int = max(
+            1, int(getattr(settings, "t212_adaptive_remaining_threshold", 10) or 10)
+        )
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -593,7 +596,7 @@ class T212Client:
                 reset_raw or "?",
                 limit_raw or "?",
             )
-        if remaining is not None and remaining < 5:
+        if remaining is not None and remaining < self._adaptive_remaining_threshold:
             reset_in = self._parse_reset_seconds(reset_raw) or 1.0
             reset_in = min(max(reset_in, 1.0), 60.0)
             until = time.monotonic() + reset_in
@@ -601,8 +604,9 @@ class T212Client:
                 self._global_backoff_until_mono = until
             self._throttled_count += 1
             log.warning(
-                "T212 remaining low (%d) — adaptive backoff %.1fs (throttled_count=%d)",
+                "T212 remaining low (%d < %d) — adaptive backoff %.1fs (throttled_count=%d)",
                 remaining,
+                self._adaptive_remaining_threshold,
                 reset_in,
                 self._throttled_count,
             )

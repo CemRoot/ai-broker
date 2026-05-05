@@ -13,6 +13,7 @@ resources (httpx client, PTB bot, LLM services) — no ``@app.on_event``.
 from __future__ import annotations
 
 import asyncio
+import random
 from contextlib import asynccontextmanager
 
 import httpx
@@ -75,10 +76,25 @@ async def lifespan(app: FastAPI):
     )
     t212 = T212Client(http_client, settings)
     log.info("T212 client ready — base=%s", settings.t212_api_url)
+
+    async def _startup_jitter(label: str) -> None:
+        lo = float(getattr(settings, "t212_startup_jitter_min_sec", 5.0) or 0.0)
+        hi = float(getattr(settings, "t212_startup_jitter_max_sec", 15.0) or 0.0)
+        if hi <= 0:
+            return
+        if hi < lo:
+            lo, hi = hi, lo
+        delay = random.uniform(max(0.0, lo), max(0.0, hi))
+        if delay <= 0:
+            return
+        log.info("Startup jitter (%s): sleeping %.1fs", label, delay)
+        await asyncio.sleep(delay)
+
     if settings.paper_executes_on_t212 and (
         (settings.t212_demo_api_key or "").strip() and (settings.t212_demo_api_secret or "").strip()
     ):
         try:
+            await _startup_jitter("t212_instruments_prime")
             await t212.fetch_equity_instruments_list()
             log.info(
                 "T212 equity instruments cache primed (%d tradeable STOCK/ETF)",
@@ -114,6 +130,7 @@ async def lifespan(app: FastAPI):
         and supabase_db.get_pool()
     ):
         try:
+            await _startup_jitter("t212_shadow_ledger_initial_sync")
             await paper_broker.sync_ledger_from_t212_client(t212)
             log.info("T212 → Supabase shadow ledger initial sync OK")
         except Exception as exc:
@@ -269,7 +286,11 @@ async def lifespan(app: FastAPI):
 
     paper_task = None
     if settings.paper_agent_enabled:
-        paper_task = asyncio.create_task(paper_agent.run_forever())
+        async def _paper_agent_runner() -> None:
+            await _startup_jitter("paper_agent_loop_start")
+            await paper_agent.run_forever()
+
+        paper_task = asyncio.create_task(_paper_agent_runner())
         log.info("PaperAgent background task started")
     else:
         log.info("PaperAgent disabled (set PAPER_AGENT_ENABLED=true to run loop)")
@@ -286,7 +307,11 @@ async def lifespan(app: FastAPI):
             t212=t212,
             paper_broker=paper_broker,
         )
-        mirror_poll_task = asyncio.create_task(mirror_poller.run_forever())
+        async def _mirror_poller_runner() -> None:
+            await _startup_jitter("t212_mirror_poller_start")
+            await mirror_poller.run_forever()
+
+        mirror_poll_task = asyncio.create_task(_mirror_poller_runner())
         log.info(
             "T212MirrorPoller started (every %ss; reconcile external=%s)",
             max(15, settings.paper_t212_pending_poll_sec),
@@ -303,6 +328,7 @@ async def lifespan(app: FastAPI):
         async def _t212_shadow_ledger_loop() -> None:
             interval = float(max(30, settings.paper_t212_pending_poll_sec))
             log.info("T212 shadow ledger sync only (mirror poller off), every %ss", interval)
+            await _startup_jitter("t212_shadow_ledger_loop_start")
             while True:
                 try:
                     await paper_broker.sync_ledger_from_t212_client(t212)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import time
 from datetime import datetime, timezone
@@ -37,6 +38,7 @@ _T212_CACHE_TTL_SEC: float = 60.0
 _t212_cache: dict[str, Any] | None = None
 _t212_cache_at: float = 0.0
 _t212_cache_lock = asyncio.Lock()
+_t212_first_fetch_jitter_done: bool = False
 
 # Whole-snapshot cache — Supabase (cycles + trades + ledger + memories) and the
 # T212 fetch are both rolled into a single dict; with 15 s TTL several browser
@@ -71,7 +73,14 @@ def truncate(text: str, max_len: int) -> str:
     return t[: max_len - 1] + "…"
 
 
-async def _fetch_t212_account_cached(t212: Any, currency: str, ttl_sec: float) -> dict[str, Any]:
+async def _fetch_t212_account_cached(
+    t212: Any,
+    currency: str,
+    ttl_sec: float,
+    *,
+    startup_jitter_min_sec: float = 5.0,
+    startup_jitter_max_sec: float = 15.0,
+) -> dict[str, Any]:
     """Return a cached T212 ``account+positions`` snapshot for the public dashboard.
 
     A ~30 s in-process cache absorbs concurrent ``/public/live`` callers and
@@ -79,7 +88,7 @@ async def _fetch_t212_account_cached(t212: Any, currency: str, ttl_sec: float) -
     On error we cache the failure briefly too — repeatedly hammering a degraded
     upstream just makes things worse.
     """
-    global _t212_cache, _t212_cache_at
+    global _t212_cache, _t212_cache_at, _t212_first_fetch_jitter_done
     now = time.monotonic()
     ttl = max(5.0, float(ttl_sec))
     if _t212_cache is not None and (now - _t212_cache_at) < ttl:
@@ -95,6 +104,16 @@ async def _fetch_t212_account_cached(t212: Any, currency: str, ttl_sec: float) -
             cached = dict(_t212_cache)
             cached["cached_age_s"] = round(now - _t212_cache_at, 1)
             return cached
+        if not _t212_first_fetch_jitter_done:
+            _t212_first_fetch_jitter_done = True
+            lo = max(0.0, float(startup_jitter_min_sec))
+            hi = max(0.0, float(startup_jitter_max_sec))
+            if hi < lo:
+                lo, hi = hi, lo
+            delay = random.uniform(lo, hi) if hi > 0 else 0.0
+            if delay > 0:
+                log.info("public_live first T212 fetch startup jitter: %.1fs", delay)
+                await asyncio.sleep(delay)
 
         fetched_iso = datetime.now(timezone.utc).isoformat()
         out: dict[str, Any] = {
@@ -491,7 +510,13 @@ async def _compute_public_live_snapshot(request: Request) -> dict[str, Any]:
     t212_account: dict[str, Any] | None = None
     if settings and getattr(settings, "paper_executes_on_t212", False) and t212 is not None:
         ttl = float(getattr(settings, "public_live_t212_cache_ttl_sec", _T212_CACHE_TTL_SEC) or _T212_CACHE_TTL_SEC)
-        t212_account = await _fetch_t212_account_cached(t212, currency, ttl)
+        t212_account = await _fetch_t212_account_cached(
+            t212,
+            currency,
+            ttl,
+            startup_jitter_min_sec=float(getattr(settings, "t212_startup_jitter_min_sec", 5.0) or 0.0),
+            startup_jitter_max_sec=float(getattr(settings, "t212_startup_jitter_max_sec", 15.0) or 0.0),
+        )
 
     nav_display = ledger_nav
     nav_display_source = "supabase_ledger"

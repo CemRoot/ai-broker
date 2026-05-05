@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     t212_base_url: str = "https://demo.trading212.com"
     t212_demo_api_key: str = ""
     t212_demo_api_secret: str = ""
+    #: Startup jitter window (seconds) to avoid bursty first-wave T212 calls
+    #: from multiple loops/routes right after container boot.
+    t212_startup_jitter_min_sec: float = 5.0
+    t212_startup_jitter_max_sec: float = 15.0
+    #: Adaptive backoff trigger: when x-ratelimit-remaining drops below this
+    #: value, client enters a temporary global backoff window.
+    t212_adaptive_remaining_threshold: int = 10
 
     # ── LLM — Groq (primary) ────────────────────────────────────────
     groq_api_key: str = ""
