@@ -34,15 +34,18 @@ class OllamaService:
 
     def __init__(self, settings: Settings) -> None:
         self._host = settings.ollama_base_url
+        self._backup_host = (getattr(settings, "ollama_backup_base_url", "") or "").strip()
         self.model = settings.ollama_model
-        self._client = None
+        self._clients: dict[str, object] = {}
 
-    def _get_client(self):
-        if self._client is None:
+    def _get_client_for_host(self, host: str):
+        client = self._clients.get(host)
+        if client is None:
             from ollama import Client as OllamaClient
 
-            self._client = OllamaClient(host=self._host)
-        return self._client
+            client = OllamaClient(host=host)
+            self._clients[host] = client
+        return client
 
     async def analyze(self, prompt: str, system: str | None = None) -> LLMResponse:
         """Send a chat request to the local Ollama daemon.
@@ -54,33 +57,53 @@ class OllamaService:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        t0 = time.perf_counter()
-        try:
-            resp_raw = await asyncio.to_thread(
-                self._get_client().chat,
-                model=self.model,
-                messages=messages,
-            )
-            elapsed = time.perf_counter() - t0
+        hosts = [self._host]
+        if self._backup_host and self._backup_host not in hosts:
+            hosts.append(self._backup_host)
 
-            text = (resp_raw.message.content or "").strip()
+        last_exc: Exception | None = None
+        saw_unreachable = False
+        for idx, host in enumerate(hosts):
+            t0 = time.perf_counter()
+            try:
+                resp_raw = await asyncio.to_thread(
+                    self._get_client_for_host(host).chat,
+                    model=self.model,
+                    messages=messages,
+                )
+                elapsed = time.perf_counter() - t0
+                text = (resp_raw.message.content or "").strip()
+                resp = LLMResponse(
+                    text=text,
+                    model=self.model,
+                    elapsed_seconds=round(elapsed, 3),
+                )
+                log.info("Ollama OK | host=%s | model=%s | %.1fs", host, self.model, elapsed)
+                return resp
+            except Exception as exc:
+                last_exc = exc
+                elapsed = time.perf_counter() - t0
+                unreachable = self._is_unreachable(exc)
+                saw_unreachable = saw_unreachable or unreachable
+                if idx < len(hosts) - 1:
+                    log.warning(
+                        "Ollama primary failed (host=%s, %.1fs): %s | trying backup host=%s",
+                        host,
+                        elapsed,
+                        exc,
+                        hosts[idx + 1],
+                    )
+                    continue
+                if unreachable:
+                    log.error("Ollama offline (host=%s, %.1fs): %s", host, elapsed, exc)
+                else:
+                    log.error("Ollama error after %.1fs (host=%s): %s", elapsed, host, exc)
 
-            resp = LLMResponse(
-                text=text,
-                model=self.model,
-                elapsed_seconds=round(elapsed, 3),
-                # Ollama doesn't provide standard usage stats
-            )
-            log.info("Ollama OK | model=%s | %.1fs", self.model, elapsed)
-            return resp
-
-        except Exception as exc:
-            elapsed = time.perf_counter() - t0
-            if self._is_unreachable(exc):
-                log.error("Ollama offline (%.1fs): %s", elapsed, exc)
-                raise RuntimeError("Ollama offline") from exc
-            log.error("Ollama error after %.1fs: %s", elapsed, exc)
-            raise
+        if last_exc is None:
+            raise RuntimeError("Ollama offline")
+        if saw_unreachable:
+            raise RuntimeError("Ollama offline") from last_exc
+        raise last_exc
 
     @staticmethod
     def _is_unreachable(exc: BaseException) -> bool:

@@ -39,6 +39,8 @@ class Settings(BaseSettings):
 
     # ── LLM — Ollama (fallback) ─────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"
+    #: Optional secondary Ollama endpoint for failover (e.g. remote Mac tunnel URL).
+    ollama_backup_base_url: str = ""
     ollama_model: str = "deepseek-r1:14b"
     #: When true, the PaperAgent skips Groq and runs a local-prepass cycle:
     #: Python-side fans out ``get_macro_context``, ``get_portfolio``, ``screen_stocks``,

@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`2026-05-06T12:56:00+01:00`:** **Ollama çoklu host failover desteği.** `app/services/llm/ollama_service.py` artık `OLLAMA_BASE_URL` başarısız olursa otomatik olarak `OLLAMA_BACKUP_BASE_URL` endpoint’ini dener; başarılı host loglanır (`host=...`). Bu sayede ana Ollama endpoint’i düşerse yedek endpoint (örn. Mac üzerindeki tunnel URL) devreye girer. `app/core/config.py` + `.env.example`: `ollama_backup_base_url` / `OLLAMA_BACKUP_BASE_URL`.
+
 - **`2026-05-06T12:52:00+01:00`:** **Acil LLM hotfix — Groq `400` de safe-mode’a alındı.** `app/services/llm/tool_calling.py` içinde Groq hatalarında `429` yanında `400 BadRequest` de fallback zincirini keser; Ollama fallback’e geçmeden `decisions=[]` (no-trade) döner. Böylece emergency/cycle akışında “Groq failed — falling back to Ollama” gürültüsü ve düşük-RAM Ollama riskleri azaltılır.
 
 - **`2026-05-05T16:56:00+01:00`:** **T212 stability mode (rate-limit baskısı için).** `app/main.py` startup instruments prime artık ayarlanabilir (`T212_PRIME_INSTRUMENTS_ON_STARTUP`, varsayılan `false`) — boot sırasında gereksiz T212 yükü azaltılır. `app/services/t212/client.py` adaptive backoff / low-remaining warning logları cooldown’lu hale getirildi (`T212_BACKOFF_LOG_COOLDOWN_SEC`, `T212_REMAINING_LOG_COOLDOWN_SEC`, varsayılan 30s) ve log flood sakinleşti. `.env.example` yeni T212 stability değişkenleriyle güncellendi.
