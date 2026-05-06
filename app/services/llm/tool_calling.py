@@ -162,6 +162,16 @@ def _is_rate_limited(exc: Exception) -> bool:
     return "rate limit" in txt or "error code: 429" in txt or "status=429" in txt
 
 
+def _is_bad_request(exc: Exception) -> bool:
+    """Return True for provider-side HTTP 400 bad-request failures."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status == 400:
+        return True
+    txt = str(exc).lower()
+    return "error code: 400" in txt or "status=400" in txt or "badrequest" in txt
+
+
 async def analyze_with_tools(
     *,
     groq: GroqService | None,
@@ -255,12 +265,12 @@ async def analyze_with_tools(
                 detail=format_exc_brief(exc),
                 dedupe_key="llm_groq_tool_fail",
             )
-            if _is_rate_limited(exc):
+            if _is_rate_limited(exc) or _is_bad_request(exc):
                 # Operational safety: when Groq is throttled, avoid cascading into
                 # heavy Ollama fallback paths that can fail on low-memory VPS nodes.
                 return ToolRunResult(
                     reasoning_text=(
-                        "Groq is temporarily rate-limited (429). "
+                        "Groq is temporarily unavailable (rate-limit or bad-request). "
                         "Returning no-trade output to keep the agent loop alive."
                     ),
                     decisions=[],

@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`2026-05-06T12:52:00+01:00`:** **Acil LLM hotfix — Groq `400` de safe-mode’a alındı.** `app/services/llm/tool_calling.py` içinde Groq hatalarında `429` yanında `400 BadRequest` de fallback zincirini keser; Ollama fallback’e geçmeden `decisions=[]` (no-trade) döner. Böylece emergency/cycle akışında “Groq failed — falling back to Ollama” gürültüsü ve düşük-RAM Ollama riskleri azaltılır.
+
 - **`2026-05-05T16:56:00+01:00`:** **T212 stability mode (rate-limit baskısı için).** `app/main.py` startup instruments prime artık ayarlanabilir (`T212_PRIME_INSTRUMENTS_ON_STARTUP`, varsayılan `false`) — boot sırasında gereksiz T212 yükü azaltılır. `app/services/t212/client.py` adaptive backoff / low-remaining warning logları cooldown’lu hale getirildi (`T212_BACKOFF_LOG_COOLDOWN_SEC`, `T212_REMAINING_LOG_COOLDOWN_SEC`, varsayılan 30s) ve log flood sakinleşti. `.env.example` yeni T212 stability değişkenleriyle güncellendi.
 
 - **`2026-05-05T16:49:00+01:00`:** **Groq 429 güvenli modu (fallback zinciri kırılmasın).** `app/services/llm/tool_calling.py` içinde `analyze_with_tools` artık Groq hatasında `429 / rate-limit` durumunu ayrı yakalar; bu durumda Ollama fallback’e zorlamadan güvenli `decisions=[]` (no-trade) döner ve PaperAgent döngüsünün RAM kaynaklı ollama çöküşüyle tamamen kırılmasını engeller. Amaç: servis canlı kalsın, trade execution yanlışlıkla tetiklenmesin.
