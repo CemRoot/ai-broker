@@ -8,6 +8,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`2026-05-06T16:41:00+01:00`:** **PaperAgent cycle frekansı env ile yönetilebilir oldu.** `paper_regular_tick_seconds` / `PAPER_REGULAR_TICK_SECONDS` eklendi (varsayılan 300s = 5 dakika). `app/main.py` `MarketClock` kurulumunda bu değeri kullanır; regular session’da daha sık heartbeat/cycle için artık kod değişmeden env’den ayarlanır.
+
+- **`2026-05-06T16:36:00+01:00`:** **Groq hard-disable anahtarı eklendi (`GROQ_ENABLED`).** `app/core/config.py` içine `groq_enabled` ayarı eklendi (varsayılan `true`). `app/main.py` artık Groq servisini yalnızca `GROQ_ENABLED=true` ve `GROQ_API_KEY` birlikteyse başlatır; aksi halde kesin olarak Ollama-only modda açılır. `/health` içindeki `groq_configured` alanı da bu bayrağı dikkate alacak şekilde güncellendi. `.env.example` yeni `GROQ_ENABLED` satırıyla güncellendi.
+
 - **`2026-05-06T12:56:00+01:00`:** **Ollama çoklu host failover desteği.** `app/services/llm/ollama_service.py` artık `OLLAMA_BASE_URL` başarısız olursa otomatik olarak `OLLAMA_BACKUP_BASE_URL` endpoint’ini dener; başarılı host loglanır (`host=...`). Bu sayede ana Ollama endpoint’i düşerse yedek endpoint (örn. Mac üzerindeki tunnel URL) devreye girer. `app/core/config.py` + `.env.example`: `ollama_backup_base_url` / `OLLAMA_BACKUP_BASE_URL`.
 
 - **`2026-05-06T12:52:00+01:00`:** **Acil LLM hotfix — Groq `400` de safe-mode’a alındı.** `app/services/llm/tool_calling.py` içinde Groq hatalarında `429` yanında `400 BadRequest` de fallback zincirini keser; Ollama fallback’e geçmeden `decisions=[]` (no-trade) döner. Böylece emergency/cycle akışında “Groq failed — falling back to Ollama” gürültüsü ve düşük-RAM Ollama riskleri azaltılır.
@@ -51,6 +55,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`2026-05-04T19:10:00+03:00`:** **Üretim VPS — TrumpMonitor commit + imaj:** `git pull --rebase origin main` (2e0b6e2) + `docker compose up -d --build --force-recreate ai-broker`; ilk anlık `/health` bağlantı hatası (warm-up), kısa gecikmeyle **`status: ok`**, `groq_configured: true`. `POST /internal/trump/pull` (konteyner içi `INTERNAL_API_KEY`) → HTTP 200, örnek yanıt `fetched:0` (timeline boş veya upstream; anahtar değerleri loglanmadı).
 
 ### Fixed
+
+- **`2026-05-06T16:41:00+01:00`:** **Ollama low-memory hatasında döngü kırılma düzeltmesi.** `app/services/llm/tool_calling.py` artık Ollama fallback sırasında `model requires more system memory` hatasını yakaladığında exception fırlatmak yerine güvenli `decisions=[]` (no-trade) döner; böylece `PaperAgent.run_forever` / `/runpaper` çağrıları crash olup sessiz kalmaz.
+
+- **`2026-05-06T16:24:00+01:00`:** **Market open sessizlik bugfix (`MarketClock`).** `app/services/market_clock.py` içinde `wait_for_next_tick()` sıralaması düzeltildi: seans açıkken (`is_market_open=True`) önce regular-session event/tick yolu çalışır, **sonraki gün `next_open()` hesabına düşüp tüm günü uyutma** hatası engellendi. Böylece `OPEN` sonrası döngü `MIDDAY/CLOSE` event’lerini kaçırmadan devam eder. Regresyon testi eklendi: `tests/unit/test_market_clock.py::test_wait_for_next_tick_during_open_session_does_not_sleep_until_tomorrow`.
 
 - **`2026-05-04T19:05:00+03:00`:** **TrumpMonitor — `trump_posts.post_text` boş kalması (boost/reblog).** Mastodon uyumlu API’de üst `content` sık boş; asıl metin `reblog.content` altında. **`app/services/trump_monitor.py`:** `_mastodon_html_to_plain` + `_status_plain_text` artık önce dış metin, sonra reblog, `spoiler_text`, ardından medya yoksa **`[Media-only post — no status text]`**, aksi halde **`[No text in status]`** (DB `NOT NULL` ile uyumlu). Birim: `tests/unit/test_trump_monitor.py` (`test_mastodon_html_to_plain_strips_tags`, `test_status_plain_text_reblog_when_outer_empty`, `test_status_plain_text_media_only_placeholder`).
 

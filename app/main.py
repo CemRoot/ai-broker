@@ -108,12 +108,15 @@ async def lifespan(app: FastAPI):
             log.warning("T212 instruments cache prime failed (BUYs will refresh on demand): %s", exc)
 
     # ── LLM services ────────────────────────────────────────────────
-    groq_svc = GroqService(settings) if settings.groq_api_key else None
+    groq_svc = GroqService(settings) if (settings.groq_enabled and settings.groq_api_key) else None
     ollama_svc = OllamaService(settings)
     if groq_svc:
         log.info("Groq service ready — model=%s", groq_svc.model)
     else:
-        log.warning("GROQ_API_KEY empty — Groq disabled, Ollama-only mode")
+        if not settings.groq_enabled:
+            log.warning("GROQ_ENABLED=false — Groq disabled, Ollama-only mode")
+        else:
+            log.warning("GROQ_API_KEY empty — Groq disabled, Ollama-only mode")
     log.info("Ollama fallback ready — model=%s host=%s", ollama_svc.model, settings.ollama_base_url)
 
     # ── RAG retriever (must exist before Telegram handler registration) ──
@@ -141,7 +144,9 @@ async def lifespan(app: FastAPI):
             log.warning("T212 initial shadow ledger sync failed: %s", exc)
 
     # ── Faz 3: Tools, screener, market clock ────────────────────────
-    market_clock = MarketClock()
+    market_clock = MarketClock(
+        regular_tick_seconds=max(60, int(getattr(settings, "paper_regular_tick_seconds", 300) or 300))
+    )
     screener = SPScreener(settings=settings, http_client=http_client)
     tool_executor = ToolExecutor(
         ToolDeps(

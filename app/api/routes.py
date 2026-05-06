@@ -87,7 +87,9 @@ def build_health_payload(*, settings, db, bot_app) -> dict:
                 getattr(db, "last_connect_error", None) if db else None
             ),
         },
-        "groq_configured": bool(settings and settings.groq_api_key),
+        "groq_configured": bool(
+            settings and getattr(settings, "groq_enabled", True) and settings.groq_api_key
+        ),
     }
 
 

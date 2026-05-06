@@ -115,6 +115,23 @@ class MarketClock:
         - TICK: regular low-frequency tick during session
         """
         now = self.now_et()
+
+        # Critical ordering: during regular session, next_open() points to the NEXT day.
+        # If we compute premarket window first, we can accidentally sleep all day.
+        if self.is_market_open(now):
+            next_ev_dt, next_ev_type = self.next_decision_event(now)
+            to_ev = max(0, int((next_ev_dt - now).total_seconds()))
+
+            # If we're at/after the event moment, fire it.
+            if to_ev <= 3:
+                return next_ev_type, self.regular_tick_seconds
+
+            # Otherwise tick at min(regular_tick, time-to-event)
+            sleep_s = min(self.regular_tick_seconds, max(1, to_ev))
+            await asyncio.sleep(sleep_s)
+            # We may have crossed into event time; caller will re-check next loop.
+            return "TICK", self.regular_tick_seconds
+
         nxt_open = self.next_open(now)
 
         # Premarket window: [open - window, open)
@@ -134,21 +151,6 @@ class MarketClock:
             )
             await asyncio.sleep(sleep_s)
             return "PREMARKET", self.premarket_tick_seconds
-
-        # Regular session / after open
-        if self.is_market_open(now):
-            next_ev_dt, next_ev_type = self.next_decision_event(now)
-            to_ev = max(0, int((next_ev_dt - now).total_seconds()))
-
-            # If we're at/after the event moment, fire it.
-            if to_ev <= 3:
-                return next_ev_type, self.regular_tick_seconds
-
-            # Otherwise tick at min(regular_tick, time-to-event)
-            sleep_s = min(self.regular_tick_seconds, max(1, to_ev))
-            await asyncio.sleep(sleep_s)
-            # We may have crossed into event time; caller will re-check next loop.
-            return "TICK", self.regular_tick_seconds
 
         # After close: wait until next premarket window (or open if window=0)
         sleep_to = pre_start if now < pre_start else self.next_open(now) - timedelta(

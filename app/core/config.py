@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     t212_remaining_log_cooldown_sec: float = 30.0
 
     # ── LLM — Groq (primary) ────────────────────────────────────────
+    #: Hard switch to disable Groq even when GROQ_API_KEY is present.
+    groq_enabled: bool = True
     groq_api_key: str = ""
 
     # ── LLM — Ollama (fallback) ─────────────────────────────────────
@@ -68,6 +70,9 @@ class Settings(BaseSettings):
     finnhub_api_key: str = ""
     fmp_api_key: str = ""
     paper_agent_enabled: bool = False
+    #: PaperAgent regular-session heartbeat/cycle interval in seconds.
+    #: 300 = 5 minutes.
+    paper_regular_tick_seconds: int = 300
     #: Starting NAV for drawdown baseline, ``/paper stats`` vs-start, and ``/paper reset`` (Supabase ledger).
     #: Numeric value is in **account currency** (``PAPER_ACCOUNT_CURRENCY``, or T212 summary when ``t212`` execution).
     #: Env name retains ``_usd`` for backward compatibility.

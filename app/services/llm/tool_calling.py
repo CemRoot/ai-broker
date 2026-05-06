@@ -172,6 +172,11 @@ def _is_bad_request(exc: Exception) -> bool:
     return "error code: 400" in txt or "status=400" in txt or "badrequest" in txt
 
 
+def _is_ollama_memory_error(exc: Exception) -> bool:
+    txt = str(exc).lower()
+    return "more system memory" in txt or "model requires more system memory" in txt
+
+
 async def analyze_with_tools(
     *,
     groq: GroqService | None,
@@ -293,6 +298,16 @@ async def analyze_with_tools(
                 detail=format_exc_brief(exc),
                 dedupe_key="llm_ollama_tool_fail",
             )
+            if _is_ollama_memory_error(exc):
+                return ToolRunResult(
+                    reasoning_text=(
+                        "Ollama model could not run due to host memory limits. "
+                        "Returning no-trade output to keep the agent loop alive."
+                    ),
+                    decisions=[],
+                    model=getattr(ollama, "model", "ollama"),
+                    iterations=1,
+                )
             raise
         reasoning, decisions = _extract_json_array(resp.text)
         return ToolRunResult(
