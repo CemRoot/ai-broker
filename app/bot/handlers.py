@@ -877,14 +877,31 @@ async def runpaper_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await _send_long(update, "⚠️ PaperAgent not running / not wired yet.")
         return
 
-    await _send_long(update, "⏳ Running paper cycle...")
-    try:
-        await agent.run_cycle("MANUAL", allow_trades=True)
-    except Exception as exc:
-        log.error("runpaper_handler error: %s", exc)
-        await _send_long(update, f"❌ Cycle error: {exc}")
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if chat_id is None:
+        await _send_long(update, "⚠️ Chat context missing.")
         return
-    await _send_long(update, "✅ Cycle complete. Use `/paper log` to view analysis.")
+
+    await _send_long(update, "⏳ Running paper cycle...")
+
+    async def _run_and_report() -> None:
+        try:
+            await agent.run_cycle("MANUAL", allow_trades=True)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="✅ Cycle complete. Use `/paper log` to view analysis.",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as exc:
+            log.error("runpaper_handler error: %s", exc)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ Cycle error: {html.escape(str(exc))}",
+                parse_mode=ParseMode.HTML,
+            )
+
+    # Run in background so webhook returns quickly; avoid Telegram timeout.
+    asyncio.create_task(_run_and_report())
 
 
 async def punishments_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
