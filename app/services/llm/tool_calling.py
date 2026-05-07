@@ -27,6 +27,7 @@ from app.services.telegram_operator_alerts import fire_operator_alert, format_ex
 from app.tools.executor import ToolExecutor
 
 log = get_logger("llm.tool_calling")
+_MAX_TOOL_CONTENT_CHARS = 1400
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,13 @@ def _coerce_tool_args(args: Any) -> dict:
             except Exception:
                 return {}
     return {}
+
+
+def _truncate_tool_content(text: str) -> str:
+    body = (text or "").strip()
+    if len(body) <= _MAX_TOOL_CONTENT_CHARS:
+        return body
+    return body[:_MAX_TOOL_CONTENT_CHARS] + "\n... [truncated]"
 
 
 def _serialize_assistant_message(msg: Any) -> dict[str, Any]:
@@ -248,7 +256,7 @@ async def analyze_with_tools(
                                 "role": "tool",
                                 "tool_call_id": tc.get("id"),
                                 "name": fn_name,
-                                "content": tool_out,
+                                "content": _truncate_tool_content(tool_out),
                             }
                         )
                     continue
@@ -362,7 +370,7 @@ async def analyze_with_tools(
                                 "role": "tool",
                                 "tool_call_id": getattr(tc, "id", None),
                                 "name": fn_name,
-                                "content": tool_out,
+                                "content": _truncate_tool_content(tool_out),
                             }
                         )
                     continue

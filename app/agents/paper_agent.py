@@ -50,6 +50,14 @@ log = get_logger("paper_agent")
 ET = ZoneInfo("America/New_York")
 
 
+def _is_plausible_trade_ticker(ticker: str) -> bool:
+    s = (ticker or "").strip().upper()
+    if not s:
+        return False
+    # Keep US equity-like symbols (AAPL, BRK.B, GOOG); reject words like NVIDIA.
+    return bool(re.fullmatch(r"[A-Z][A-Z0-9\.-]{0,4}", s))
+
+
 def _paper_agent_clock_block(settings: Settings) -> str:
     """Human-readable ET clock plus optional secondary zone (Telegram UX)."""
     now_et = datetime.now(tz=ET)
@@ -617,6 +625,9 @@ Return JSON decisions array.
     ) -> PaperTrade | None:
         action = str(d.get("action", "")).upper().strip()
         ticker = str(d.get("ticker", "")).upper().strip()
+        if ticker and not _is_plausible_trade_ticker(ticker):
+            log.warning("Skipping decision with implausible ticker: %r", ticker)
+            return None
         if not ticker or action not in ("BUY", "SELL", "HOLD", "SKIP"):
             return None
 
@@ -1548,9 +1559,14 @@ Return JSON decisions array.
         # B1: premarket / between-anchor ticks — no trades; keep Telegram concise.
         if not is_emergency and event_type in ("PREMARKET", "TICK"):
             clk = _paper_agent_clock_header(self.deps.settings, with_seconds=False)
+            status_line = (
+                "⏸ <b>Market status:</b> Pre-market window"
+                if event_type == "PREMARKET"
+                else "⏸ <b>Market status:</b> Regular session between decision anchors"
+            )
             parts = [
                 f"🤖 <b>AI Broker</b> · <b>{html.escape(event_type)}</b> · <code>{html.escape(clk)}</code>",
-                "⏸ <b>Market status:</b> Pre-market / between-event",
+                status_line,
                 "<i>No broker orders in this window (orders run on OPEN / MIDDAY / CLOSE ET).</i>",
                 "🗂 <b>Full cycle log:</b> <code>/paper log</code>",
             ]
