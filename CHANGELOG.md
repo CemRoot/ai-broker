@@ -44,6 +44,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`2026-05-07T16:30:00+01:00`:** **Cerebras 429/400 operatör alarm gürültüsü azaltıldı.** `app/services/llm/tool_calling.py` artık handle edilen soft-fail durumlarında (`429`, `400`) yanlış yönlendiren “falling back to Groq” operator alert’i göndermez; log mesajı fallback hedefini dinamik ve doğru (`Groq` vs `local prepass / no-trade guard`) yazar.
+
 - **`2026-05-07T12:54:00+01:00`:** **Telegram `/portfolio` kartı HTML formatına geçirildi.** `app/bot/handlers.py` `portfolio_handler` artık markdown işaretleri (`*`, `_`) yerine `ParseMode.HTML` ile başlık/para birimi/pozisyon satırlarını profesyonel ve tutarlı biçimde render eder.
 
 - **`2026-05-07T12:53:00+01:00`:** **PaperAgent canlı feed kartları görsel olarak profesyonelleştirildi.** `app/agents/paper_agent.py` içinde PREMARKET/TICK ve normal cycle Telegram mesaj şablonları sade başlık + section düzenine taşındı (`Market status`, `Risk snapshot`, `Macro`, `Decisions`, `NAV/Cash`). Uzun “Portfolio risk snapshot” satırı regex ile kompaktlaştırıldı (`NAV/Peak/Drawdown/limit`), decision satırları daha okunur tipografiye geçirildi.

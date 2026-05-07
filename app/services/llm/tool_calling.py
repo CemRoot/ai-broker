@@ -321,24 +321,30 @@ async def analyze_with_tools(
             )
             # endregion
             final_messages_chars, _ = _estimate_payload_chars(messages, tools)
+            soft_fail = _is_rate_limited(exc) or _is_bad_request(exc)
+            fallback_target = "Groq" if bool(groq) else "local prepass / no-trade guard"
             log.warning(
-                "Cerebras analyze_with_tools failed; fallback to Groq | model=%s iters=%d "
-                "msg_chars_initial=%d msg_chars_final=%d tools_chars=%d tool_count=%d | %s",
+                "Cerebras analyze_with_tools failed; fallback=%s | model=%s iters=%d "
+                "msg_chars_initial=%d msg_chars_final=%d tools_chars=%d tool_count=%d "
+                "soft_fail=%s | %s",
+                fallback_target,
                 cerebras.model,
                 len(messages),
                 initial_messages_chars,
                 final_messages_chars,
                 tools_chars,
                 len(tools),
+                soft_fail,
                 _error_detail(exc),
             )
-            await fire_operator_alert(
-                category="LLM · Cerebras",
-                summary="analyze_with_tools: Cerebras failed — falling back to Groq.",
-                detail=format_exc_brief(exc),
-                dedupe_key="llm_cerebras_tool_fail",
-            )
-            if _is_rate_limited(exc) or _is_bad_request(exc):
+            if not soft_fail:
+                await fire_operator_alert(
+                    category="LLM · Cerebras",
+                    summary=f"analyze_with_tools: Cerebras failed — fallback to {fallback_target}.",
+                    detail=format_exc_brief(exc),
+                    dedupe_key="llm_cerebras_tool_fail",
+                )
+            if soft_fail:
                 # region agent log
                 debug_probe(
                     run_id="pre-fix",
