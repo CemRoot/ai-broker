@@ -58,6 +58,18 @@ def _is_plausible_trade_ticker(ticker: str) -> bool:
     return bool(re.fullmatch(r"[A-Z][A-Z0-9\.-]{0,4}", s))
 
 
+def _looks_like_prompt_leak(text: str) -> bool:
+    s = (text or "").lower()
+    markers = (
+        "output format:",
+        "alpha setups",
+        "edge quality matrix",
+        "hypothesis a",
+        "hard rules:",
+    )
+    return any(m in s for m in markers)
+
+
 def _paper_agent_clock_block(settings: Settings) -> str:
     """Human-readable ET clock plus optional secondary zone (Telegram UX)."""
     now_et = datetime.now(tz=ET)
@@ -1507,6 +1519,12 @@ Return JSON decisions array.
         elapsed = time.perf_counter() - t0
         log.info("Local-prepass OK (%.1fs, model=%s)", elapsed, resp.model)
         reasoning, decisions = _extract_json_array(resp.text)
+        if not decisions and _looks_like_prompt_leak(reasoning):
+            log.warning("Local-prepass returned prompt-like template text; sanitizing analysis output")
+            reasoning = (
+                "Model returned non-actionable template text for this cycle. "
+                "No trade decisions produced."
+            )
         return ToolRunResult(
             reasoning_text=reasoning or resp.text,
             decisions=decisions,

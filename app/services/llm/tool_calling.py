@@ -28,6 +28,7 @@ from app.tools.executor import ToolExecutor
 
 log = get_logger("llm.tool_calling")
 _MAX_TOOL_CONTENT_CHARS = 1400
+_MAX_CHAT_MESSAGES = 28
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,26 @@ def _truncate_tool_content(text: str) -> str:
     if len(body) <= _MAX_TOOL_CONTENT_CHARS:
         return body
     return body[:_MAX_TOOL_CONTENT_CHARS] + "\n... [truncated]"
+
+
+def _compact_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Keep prompt anchors (system + first user) and trim rolling history.
+    Prevents context_length_exceeded when tool loops append many entries.
+    """
+    if len(messages) <= _MAX_CHAT_MESSAGES:
+        return messages
+    head: list[dict[str, Any]] = []
+    idx = 0
+    if messages and messages[0].get("role") == "system":
+        head.append(messages[0])
+        idx = 1
+    if idx < len(messages) and messages[idx].get("role") == "user":
+        head.append(messages[idx])
+        idx += 1
+    budget = max(4, _MAX_CHAT_MESSAGES - len(head))
+    tail = messages[-budget:]
+    return head + tail
 
 
 def _serialize_assistant_message(msg: Any) -> dict[str, Any]:
@@ -230,7 +251,7 @@ async def analyze_with_tools(
                 )
                 # endregion
                 completion = await cerebras.create_chat_completion(
-                    messages=messages,
+                    messages=_compact_chat_messages(messages),
                     tools=tools,
                     tool_choice="auto",
                 )
@@ -350,7 +371,7 @@ async def analyze_with_tools(
                 completion = await asyncio.to_thread(
                     client.chat.completions.create,
                     model=groq.model,
-                    messages=messages,
+                    messages=_compact_chat_messages(messages),
                     tools=tools,
                     tool_choice="auto",
                 )

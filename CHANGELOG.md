@@ -64,6 +64,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-07T16:27:00+01:00`:** **LLM çıktı hijyeni ve context taşması sertleştirildi.** `app/services/llm/tool_calling.py` içine chat geçmişi kompaksiyonu eklendi (`_compact_chat_messages`, rolling cap) — uzun tool döngülerinde Cerebras `context_length_exceeded` riskini azaltır. `app/agents/paper_agent.py` local-prepass sonucu prompt şablonunu geri kusarsa (boş `decisions` + template marker) analiz metni kullanıcıya temiz/sade “non-actionable template” notuna sanitize edilir; `/paper log` artık sistem prompt dump’ı göstermez.
+
 - **`2026-05-07T16:16:00+01:00`:** **Runtime davranış düzeltmeleri (market-state metni + ticker hallüsinasyon guard + context şişmesi).** `app/agents/paper_agent.py` TICK canlı feed mesajı artık market açık saatlerde yanlışlıkla “Pre-market” demez; “Regular session between decision anchors” olarak ayrıştırılır. Aynı dosyada LLM kararlarındaki gerçekçi olmayan ticker’lar (örn. `NVIDIA`, `SCREEN_RESULT_0`) trade yürütmeden önce skip edilir. `app/services/llm/tool_calling.py` tool sonuçları modele eklenmeden önce boyut sınırına kırpılır (`_MAX_TOOL_CONTENT_CHARS`), böylece Cerebras `context_length_exceeded` 400 riskinde mesaj şişmesi azaltılır.
 
 - **`2026-05-07T12:43:00+01:00`:** **Startup crash fix (`PaperAgentDeps` constructor mismatch).** `PaperAgentDeps` imzasına `ollama` eklendikten sonra `app/main.py` bu bağımlılığı geçmediği için lifespan aşamasında `TypeError: missing 1 required positional argument: 'ollama'` ile yeniden crash-loop oluşuyordu. `PaperAgentDeps(...)` kurulumuna `ollama=ollama_svc` eklendi.
