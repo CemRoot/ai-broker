@@ -58,6 +58,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-07T12:40:00+01:00`:** **Startup crash fix (`ToolDeps` constructor mismatch).** `app/main.py` `ToolDeps(..., ollama=...)` ile başlatılırken `app/tools/executor.py` dataclass imzasında `ollama` alanı olmadığı için uygulama lifespan aşamasında `TypeError: unexpected keyword argument 'ollama'` ile crash-loop’a giriyordu. `ToolDeps` içine `ollama: OllamaService | None` alanı eklendi; startup uyumluluğu geri geldi.
+
 - **`2026-05-07T12:13:00+01:00`:** **PaperAgent için LLM fallback zinciri düzeltildi (runtime 429 kanıtına göre).** `Cerebras analyze_with_tools` 429 verip `GROQ_ENABLED=false` olduğunda döngü `decisions=[]` ile sessiz kalıyordu; `app/agents/paper_agent.py` artık bu koşulda otomatik **local prepass** yoluna düşer. `local prepass` içinde provider sırası **Cerebras → Groq → Ollama** yapıldı, böylece Groq kapalı olsa bile Ollama ile karar üretimi devam eder.
 
 - **`2026-05-06T16:41:00+01:00`:** **Ollama low-memory hatasında döngü kırılma düzeltmesi.** `app/services/llm/tool_calling.py` artık Ollama fallback sırasında `model requires more system memory` hatasını yakaladığında exception fırlatmak yerine güvenli `decisions=[]` (no-trade) döner; böylece `PaperAgent.run_forever` / `/runpaper` çağrıları crash olup sessiz kalmaz.

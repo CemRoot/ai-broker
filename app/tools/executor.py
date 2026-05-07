@@ -19,6 +19,7 @@ from app.memory.retriever import RAGRetriever
 from app.services.paper.broker import PaperBroker
 from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
+from app.services.llm.ollama_service import OllamaService
 
 log = get_logger("tools.executor")
 
@@ -52,6 +53,7 @@ class ToolDeps:
     screener: Any | None = None
     #: When ``paper_executes_on_t212``, portfolio tool reads from T212 API.
     t212: Any | None = None
+    ollama: OllamaService | None = None
 
 
 class ToolExecutor:
