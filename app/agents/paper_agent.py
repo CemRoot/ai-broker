@@ -70,6 +70,25 @@ def _looks_like_prompt_leak(text: str) -> bool:
     return any(m in s for m in markers)
 
 
+def _looks_like_tool_call_dump(text: str) -> bool:
+    s = (text or "").lower()
+    return (
+        '"type": "function"' in s
+        and '"name":' in s
+        and '"arguments":' in s
+    )
+
+
+def _is_disallowed_buy_ticker(ticker: str) -> bool:
+    """Disallow index/ETF-style benchmark symbols for BUY decisions."""
+    t = (ticker or "").strip().upper()
+    disallowed = {
+        "SPY", "QQQ", "DIA", "IWM", "VTI", "VOO", "IVV",
+        "NASDAQ", "NDX", "SPX", "S&P500",
+    }
+    return t in disallowed
+
+
 def _paper_agent_clock_block(settings: Settings) -> str:
     """Human-readable ET clock plus optional secondary zone (Telegram UX)."""
     now_et = datetime.now(tz=ET)
@@ -408,6 +427,27 @@ Use tools to gather data. Follow the trading rules.
                 user_message=user_message,
                 macro_snip=macro_snip or "",
             )
+        elif (
+            not (result.decisions or [])
+            and _looks_like_tool_call_dump(result.reasoning_text or "")
+        ):
+            # Some model responses leak tool-call JSON in content instead of a final answer.
+            # Retry once with local prepass so cycle does not end with empty, non-actionable output.
+            log.warning("Tool-call dump detected in analysis output; retrying with local prepass")
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H9",
+                location="app/agents/paper_agent.py:run_cycle",
+                message="fallback to local prepass due to tool-call dump",
+                data={"event_type": event_type, "model_before": result.model},
+            )
+            # endregion
+            result = await self._run_cycle_local_prepass(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                macro_snip=macro_snip or "",
+            )
 
         analysis_text = (result.reasoning_text or "").strip()
         decisions = result.decisions or []
@@ -617,6 +657,25 @@ Return JSON decisions array.
                     user_message=user_message,
                     macro_snip=macro_snip or "",
                 )
+            elif (
+                not (result.decisions or [])
+                and _looks_like_tool_call_dump(result.reasoning_text or "")
+            ):
+                log.warning("Tool-call dump detected in emergency analysis output; retrying local prepass")
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H9",
+                    location="app/agents/paper_agent.py:run_emergency_cycle",
+                    message="emergency fallback to local prepass due to tool-call dump",
+                    data={"trigger": trigger, "model_before": result.model},
+                )
+                # endregion
+                result = await self._run_cycle_local_prepass(
+                    system_prompt=build_paper_system_prompt(acct_cur),
+                    user_message=user_message,
+                    macro_snip=macro_snip or "",
+                )
             analysis_text = (result.reasoning_text or "").strip()
             decisions = result.decisions or []
             await self._save_cycle_log(event_type=f"EMERGENCY:{trigger}", analysis=analysis_text, decisions=decisions)
@@ -671,6 +730,19 @@ Return JSON decisions array.
                 location="app/agents/paper_agent.py:_apply_decision",
                 message="decision rejected",
                 data={"ticker": ticker, "action": action, "reason": "invalid_action_or_ticker"},
+            )
+            # endregion
+            return None
+
+        if action == "BUY" and _is_disallowed_buy_ticker(ticker):
+            log.warning("Skipping BUY %s: benchmark/index ETF ticker not allowed for execution", ticker)
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H10",
+                location="app/agents/paper_agent.py:_apply_decision",
+                message="decision rejected",
+                data={"ticker": ticker, "action": action, "reason": "disallowed_benchmark_or_etf"},
             )
             # endregion
             return None
@@ -1603,6 +1675,12 @@ Return JSON decisions array.
             log.warning("Local-prepass returned prompt-like template text; sanitizing analysis output")
             reasoning = (
                 "Model returned non-actionable template text for this cycle. "
+                "No trade decisions produced."
+            )
+        elif not decisions and _looks_like_tool_call_dump(reasoning):
+            log.warning("Local-prepass returned tool-call dump text; sanitizing analysis output")
+            reasoning = (
+                "Model returned raw tool-call text instead of a final decision block. "
                 "No trade decisions produced."
             )
         return ToolRunResult(

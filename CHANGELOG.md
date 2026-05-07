@@ -70,6 +70,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`2026-05-07T16:52:00+01:00`:** **BUY kararlarında benchmark/index ETF blokajı eklendi.** `app/agents/paper_agent.py` artık `SPY`, `QQQ`, `DIA`, `IWM`, `VTI`, `VOO`, `IVV`, `NASDAQ`, `NDX`, `SPX`, `S&P500` gibi sembolleri BUY için yürütmez; model önerse bile executor katmanında skip edilir ve debug probe reason=`disallowed_benchmark_or_etf` loglanır.
+
+- **`2026-05-07T16:50:00+01:00`:** **Function-call dump çıktısı için otomatik kurtarma eklendi.** Bazı `analyze_with_tools` dönüşlerinde model final karar yerine ham `{"type":"function","name":...}` metni verdiğinde cycle boş kalıyordu (`Decisions JSON: []`). `app/agents/paper_agent.py` artık bu paterni algılayıp bir kez local-prepass ile yeniden dener; local-prepass de aynı dump’ı dönerse analiz metni sanitize edilir.
+
 - **`2026-05-07T16:27:00+01:00`:** **LLM çıktı hijyeni ve context taşması sertleştirildi.** `app/services/llm/tool_calling.py` içine chat geçmişi kompaksiyonu eklendi (`_compact_chat_messages`, rolling cap) — uzun tool döngülerinde Cerebras `context_length_exceeded` riskini azaltır. `app/agents/paper_agent.py` local-prepass sonucu prompt şablonunu geri kusarsa (boş `decisions` + template marker) analiz metni kullanıcıya temiz/sade “non-actionable template” notuna sanitize edilir; `/paper log` artık sistem prompt dump’ı göstermez.
 
 - **`2026-05-07T16:16:00+01:00`:** **Runtime davranış düzeltmeleri (market-state metni + ticker hallüsinasyon guard + context şişmesi).** `app/agents/paper_agent.py` TICK canlı feed mesajı artık market açık saatlerde yanlışlıkla “Pre-market” demez; “Regular session between decision anchors” olarak ayrıştırılır. Aynı dosyada LLM kararlarındaki gerçekçi olmayan ticker’lar (örn. `NVIDIA`, `SCREEN_RESULT_0`) trade yürütmeden önce skip edilir. `app/services/llm/tool_calling.py` tool sonuçları modele eklenmeden önce boyut sınırına kırpılır (`_MAX_TOOL_CONTENT_CHARS`), böylece Cerebras `context_length_exceeded` 400 riskinde mesaj şişmesi azaltılır.
