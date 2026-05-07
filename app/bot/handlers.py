@@ -127,7 +127,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"• <code>/analyze SYMBOL</code> — {esc('yfinance teknik (RSI, SMA, MACD) + AI tezi')}",
             f"• <code>/analyze SYMBOL news</code> — {esc('+ Finnhub haber duyarlılığı + birleşik AI')}",
             f"• <code>/analyze SYMBOL news full</code> — {esc('+ 31 feature genişletilmiş teknik')}",
-            f"• <code>/news SYMBOL</code> — {esc('Haber duyarlılığı (Groq batch)')}",
+            f"• <code>/news SYMBOL</code> — {esc('Haber duyarlılığı (LLM batch)')}",
             f"• <code>/memory SYMBOL</code> — {esc('RAG: dersler, başarı/uyarı')}",
             "",
             "<u>Paper Agent</u>",
@@ -135,7 +135,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"• <code>/punishments</code> — {esc('Aktif ticker cezaları (peş peşe loss → geçici ban)')}",
             "",
             "<u>İzleme</u>",
-            f"• <code>/usage</code> — {esc('Groq + Ollama token / maliyet özeti')}",
+            f"• <code>/usage</code> — {esc('Cerebras + Groq token / maliyet özeti')}",
             "",
             "<u>Sohbet (komutsuz)</u>",
             esc("Komutla başlamayan mesajlar broker bağlamıyla yanıtlanır. Örnek:"),
@@ -145,7 +145,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "<u>Otomatik bildirimler</u>",
             esc(
                 "BUY/SELL kartları, OPEN/MIDDAY/CLOSE özetleri, invalidasyon SELL, acil tetikleyiciler. "
-                "Kritik LLM / PaperAgent hataları (Groq↔Ollama fallback vb.) aynı sohbete operatör uyarısı olarak düşer "
+                "Kritik LLM / PaperAgent hataları (Cerebras→Groq fallback vb.) aynı sohbete operatör uyarısı olarak düşer "
                 "(TELEGRAM_OPERATOR_ALERTS_ENABLED)."
             ),
             "",
@@ -159,7 +159,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 # ── Free-text chat handler ──────────────────────────────────────────
 
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Free-text → Ollama (broker context). No trade execution from chat."""
+    """Free-text → LLM (broker context). No trade execution from chat."""
     allowed = context.bot_data.get("allowed_ids", set())
     if not _check_user(update, allowed):
         return
@@ -169,11 +169,12 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not text:
         return
 
-    ollama = context.bot_data.get("ollama")
+    cerebras = context.bot_data.get("cerebras")
+    groq = context.bot_data.get("groq")
     t212 = context.bot_data.get("t212")
     paper_agent = context.bot_data.get("paper_agent")
-    if ollama is None:
-        await _send_long(update, "⚠️ Sohbet için Ollama yapılandırılmamış.")
+    if cerebras is None and groq is None:
+        await _send_long(update, "⚠️ Sohbet için LLM yapılandırılmamış.")
         return
 
     ctx_lines: list[str] = []
@@ -219,18 +220,31 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception:
         pass
     try:
-        resp = await ollama.analyze(text, system=system_prompt)
-        out = _strip_thinking(resp.text)[:3500]
+        resp = None
+        if cerebras:
+            try:
+                resp = await cerebras.analyze(text, system=system_prompt)
+            except Exception as exc:
+                log.warning("chat_handler Cerebras failed: %s", exc)
+                await fire_operator_alert(
+                    category="Telegram · Sohbet",
+                    summary="chat_handler: Cerebras cevap üretemedi — Groq deneniyor.",
+                    detail=format_exc_brief(exc),
+                    dedupe_key="telegram_chat_cerebras",
+                )
+        if resp is None and groq:
+            resp = await groq.analyze(text, system=system_prompt)
+        out = _strip_thinking(resp.text if resp else "")[:3500]
         if not out:
             out = "(boş cevap)"
         await _send_long(update, out)
     except Exception as exc:
-        log.error("chat_handler ollama failed: %s", exc)
+        log.error("chat_handler LLM failed: %s", exc)
         await fire_operator_alert(
             category="Telegram · Sohbet",
-            summary="chat_handler: Ollama cevap üretemedi.",
+            summary="chat_handler: LLM cevap üretemedi.",
             detail=format_exc_brief(exc),
-            dedupe_key="telegram_chat_ollama",
+            dedupe_key="telegram_chat_llm",
         )
         await _send_long(update, f"⚠️ Sohbet hatası: {type(exc).__name__}: {exc}")
 
@@ -276,7 +290,7 @@ async def portfolio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """``/analyze SYMBOL`` — technical analysis + Groq (fallback Ollama)."""
+    """``/analyze SYMBOL`` — technical analysis + LLM."""
     allowed = context.bot_data.get("allowed_ids", set())
     if not _check_user(update, allowed):
         return
@@ -298,8 +312,8 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     settings = context.bot_data.get("settings")
     http = context.bot_data.get("http_client")
+    cerebras_svc = context.bot_data.get("cerebras")
     groq_svc = context.bot_data.get("groq")
-    ollama_svc = context.bot_data.get("ollama")
     retriever = context.bot_data.get("retriever")
     t212 = context.bot_data.get("t212")
 
@@ -317,8 +331,8 @@ async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         settings=settings,
         http_client=http,
         t212=t212,
+        cerebras=cerebras_svc,
         groq=groq_svc,
-        ollama=ollama_svc,
         retriever=retriever,
         include_news=include_news,
         include_extended_technical=include_extended,
@@ -351,8 +365,8 @@ async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     symbol = context.args[0].upper()
     settings = context.bot_data.get("settings")
     http = context.bot_data.get("http_client")
+    cerebras_svc = context.bot_data.get("cerebras")
     groq_svc = context.bot_data.get("groq")
-    ollama_svc = context.bot_data.get("ollama")
 
     if not settings or not getattr(settings, "finnhub_api_key", ""):
         await _send_long(
@@ -362,6 +376,9 @@ async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     if not http:
         await _send_long(update, "⚠️ HTTP client hazır değil.")
+        return
+    if not cerebras_svc and not groq_svc:
+        await _send_long(update, "⚠️ LLM servisleri hazır değil.")
         return
 
     await _send_long(update, f"⏳ {symbol} haberleri çekiliyor + AI skorlanıyor...")
@@ -387,8 +404,8 @@ async def news_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         merged, model = await analyze_news_batch(
             symbol=symbol,
             articles=articles,
+            cerebras=cerebras_svc,
             groq=groq_svc,
-            ollama=ollama_svc,
         )
     except Exception as exc:
         log.error("news batch failed: %s", exc)
@@ -930,4 +947,3 @@ async def punishments_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         exp = p.expires_at.isoformat() if p.expires_at else "N/A"
         lines.append(f"- {p.ticker}: {p.penalty_type} until {exp} | {p.reason[:120]}")
     await _send_long(update, "\n".join(lines))
-

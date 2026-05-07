@@ -39,7 +39,32 @@ async def test_wait_for_next_tick_during_open_session_does_not_sleep_until_tomor
 
     event, cadence = await mc.wait_for_next_tick()
 
-    assert event == "TICK"
+    assert event == "OPEN"
     assert cadence == 1800
-    assert slept == [1800]
+    assert slept == []
 
+
+@pytest.mark.asyncio
+async def test_wait_for_next_tick_fires_open_if_boundary_crossed(monkeypatch):
+    mc = MarketClock(regular_tick_seconds=300)
+    now = datetime(2026, 5, 6, 9, 30, 5, tzinfo=ET)
+    slept: list[int] = []
+
+    monkeypatch.setattr(mc, "now_et", lambda: now)
+    monkeypatch.setattr(mc, "is_market_open", lambda when=None: True)
+    monkeypatch.setattr(
+        mc,
+        "next_decision_event",
+        lambda when=None: (datetime(2026, 5, 6, 12, 0, 0, tzinfo=ET), "MIDDAY"),
+    )
+
+    async def _fake_sleep(seconds: int) -> None:
+        slept.append(int(seconds))
+
+    monkeypatch.setattr("app.services.market_clock.asyncio.sleep", _fake_sleep)
+
+    event, cadence = await mc.wait_for_next_tick()
+
+    assert event == "OPEN"
+    assert cadence == 300
+    assert slept == []

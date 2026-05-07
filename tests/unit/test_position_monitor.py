@@ -25,10 +25,15 @@ async def test_check_invalidations_skips_when_no_invalidation():
     broker.get_latest_invalidation_for_ticker.return_value = None
 
     tools = AsyncMock()
+    cerebras = None
     groq = MagicMock()
-    ollama = None
 
-    mon = PositionMonitor(paper_broker=broker, groq=groq, ollama=ollama, tool_executor=tools)
+    mon = PositionMonitor(
+        paper_broker=broker,
+        cerebras=cerebras,
+        groq=groq,
+        tool_executor=tools,
+    )
     out = await mon.check_invalidations()
     assert out == []
     tools.execute.assert_not_called()
@@ -43,11 +48,18 @@ async def test_check_invalidations_forces_sell_when_llm_says_met(monkeypatch):
     tools = AsyncMock()
     tools.execute.return_value = '{"rsi_14": 30}'
 
+    cerebras = MagicMock()
+    cerebras.analyze = AsyncMock(
+        return_value=LLMResponse(text='{"met": true, "reason": "broke support"}', model="x")
+    )
     groq = MagicMock()
-    groq.analyze = AsyncMock(return_value=LLMResponse(text='{"met": true, "reason": "broke support"}', model="x"))
-    ollama = None
 
-    mon = PositionMonitor(paper_broker=broker, groq=groq, ollama=ollama, tool_executor=tools)
+    mon = PositionMonitor(
+        paper_broker=broker,
+        cerebras=cerebras,
+        groq=groq,
+        tool_executor=tools,
+    )
     out = await mon.check_invalidations()
     assert len(out) == 1
     assert out[0]["action"] == "SELL"

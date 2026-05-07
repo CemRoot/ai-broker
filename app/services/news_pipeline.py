@@ -1,5 +1,5 @@
 """
-PokieTicker Layer 1–style batch news scoring via Groq (optional Ollama fallback).
+PokieTicker Layer 1–style batch news scoring via Cerebras (Groq fallback).
 
 Ported ideas: keyword extraction, single prompt for up to ``BATCH_SIZE`` articles,
 compact JSON array output. No SQLite — stateless; persistence is Faz 2 (Supabase).
@@ -14,8 +14,8 @@ import re
 from typing import Any
 
 from app.core.logging import get_logger
+from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
-from app.services.llm.ollama_service import OllamaService
 from app.services.telegram_operator_alerts import fire_operator_alert, format_exc_brief
 
 log = get_logger("news_pipeline")
@@ -219,9 +219,8 @@ async def analyze_news_batch(
     *,
     symbol: str,
     articles: list[dict[str, Any]],
+    cerebras: CerebrasService | None,
     groq: GroqService | None,
-    ollama: OllamaService | None,
-    prefer_local: bool = False,
 ) -> tuple[list[dict[str, Any]], str]:
     """Run Layer-1-style batch scoring. Chunks at ``BATCH_SIZE``.
 
@@ -241,42 +240,42 @@ async def analyze_news_batch(
         prompt = build_batch_prompt(sym, chunk, use_toon=False)
 
         text_out = ""
-        if groq and not prefer_local:
+        if cerebras:
+            try:
+                resp = await cerebras.analyze(prompt, system=LAYER1_SYSTEM)
+                text_out = resp.text
+                model_used = resp.model
+            except Exception as exc:
+                log.warning("Cerebras news batch failed: %s", exc)
+                await fire_operator_alert(
+                    category="LLM · Cerebras",
+                    summary=f"analyze_news_batch({sym}): Cerebras failed — trying Groq.",
+                    detail=format_exc_brief(exc),
+                    dedupe_key="llm_cerebras_news_batch",
+                )
+
+        if not text_out and groq:
             try:
                 resp = await groq.analyze(prompt, system=LAYER1_SYSTEM)
                 text_out = resp.text
                 model_used = resp.model
             except Exception as exc:
-                log.warning("Groq news batch failed: %s", exc)
+                log.error("Groq news batch failed: %s", exc)
                 await fire_operator_alert(
                     category="LLM · Groq",
-                    summary=f"analyze_news_batch({sym}): Groq failed — trying Ollama.",
+                    summary=f"analyze_news_batch({sym}): Groq failed after Cerebras miss.",
                     detail=format_exc_brief(exc),
                     dedupe_key="llm_groq_news_batch",
-                )
-
-        if not text_out and ollama:
-            try:
-                resp = await ollama.analyze(prompt, system=LAYER1_SYSTEM)
-                text_out = resp.text
-                model_used = resp.model
-            except Exception as exc:
-                log.error("Ollama news batch failed: %s", exc)
-                await fire_operator_alert(
-                    category="LLM · Ollama",
-                    summary=f"analyze_news_batch({sym}): Ollama failed after Groq miss.",
-                    detail=format_exc_brief(exc),
-                    dedupe_key="llm_ollama_news_batch",
                 )
                 raise RuntimeError(f"News batch LLM failed: {exc}") from exc
 
         if not text_out:
             await fire_operator_alert(
                 category="LLM · News",
-                summary=f"analyze_news_batch({sym}): no LLM output (Groq off/failed and no Ollama).",
+                summary=f"analyze_news_batch({sym}): no LLM output (Cerebras/Groq unavailable).",
                 dedupe_key="llm_news_no_output",
             )
-            raise RuntimeError("No LLM available for news batch (Groq disabled and Ollama failed)")
+            raise RuntimeError("No LLM available for news batch (Cerebras/Groq unavailable)")
 
         scores = parse_layer1_response(text_out, len(chunk))
         merged = merge_article_scores(chunk, scores)

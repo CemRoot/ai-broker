@@ -2,7 +2,7 @@
 PaperAgent (Faz 3) — event-loop driven paper trading agent.
 
 No APScheduler: we use MarketClock + asyncio sleep.
-Groq is primary (tool-calling); Ollama is fallback.
+Cerebras is primary (tool-calling); Groq is fallback.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from app.core.config import Settings
 from app.core.logging import get_logger
 from app.memory.database import SupabaseDatabase
 from app.memory.retriever import RAGRetriever
+from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
-from app.services.llm.ollama_service import OllamaService
 from app.services.llm.tool_calling import (
     ToolRunResult,
     _extract_json_array,
@@ -195,8 +195,8 @@ class PaperAgentDeps:
     settings: Settings
     db: SupabaseDatabase
     paper_broker: PaperBroker
+    cerebras: CerebrasService | None
     groq: GroqService | None
-    ollama: OllamaService | None
     retriever: RAGRetriever | None
     tool_executor: ToolExecutor
     market_clock: MarketClock
@@ -347,23 +347,15 @@ Use tools to gather data. Follow the trading rules.
 """
         system_prompt = build_paper_system_prompt(acct_cur)
 
-        prefer_local = bool(getattr(self.deps.settings, "prefer_local_llm", False))
-        if prefer_local and self.deps.ollama is not None:
-            result = await self._run_cycle_local_prepass(
-                system_prompt=system_prompt,
-                user_message=user_message,
-                macro_snip=macro_snip,
-            )
-        else:
-            result = await analyze_with_tools(
-                groq=self.deps.groq,
-                ollama=self.deps.ollama,
-                tool_executor=self.deps.tool_executor,
-                system_prompt=system_prompt,
-                user_message=user_message,
-                tools=TOOLS,
-                max_iterations=10,
-            )
+        result = await analyze_with_tools(
+            cerebras=self.deps.cerebras,
+            groq=self.deps.groq,
+            tool_executor=self.deps.tool_executor,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            tools=TOOLS,
+            max_iterations=10,
+        )
 
         analysis_text = (result.reasoning_text or "").strip()
         decisions = result.decisions or []
@@ -513,8 +505,8 @@ Use tools to check portfolio exposure and decide whether to HOLD/SELL/REDUCE ris
 Return JSON decisions array.
 """
             result = await analyze_with_tools(
+                cerebras=self.deps.cerebras,
                 groq=self.deps.groq,
-                ollama=self.deps.ollama,
                 tool_executor=self.deps.tool_executor,
                 system_prompt=build_paper_system_prompt(acct_cur),
                 user_message=user_message,
@@ -1296,11 +1288,7 @@ Return JSON decisions array.
         user_message: str,
         macro_snip: str,
     ) -> ToolRunResult:
-        """Local-LLM strategy: fan out tools in Python (real data), then ask Ollama once.
-
-        Avoids Groq tokens entirely and bypasses deepseek-r1's weak tool-calling — the
-        LLM only consumes pre-computed tool outputs and emits the decisions JSON array.
-        """
+        """Prepass strategy: fan out tools in Python (real data), then ask the LLM once."""
         tx = self.deps.tool_executor
         s = self.deps.settings
 
@@ -1393,19 +1381,38 @@ Return JSON decisions array.
         )
 
         t0 = time.perf_counter()
-        try:
-            resp = await self.deps.ollama.analyze(enriched, system=system_prompt)
-        except Exception as exc:
-            log.error("Local-prepass Ollama failed: %s", exc)
-            await fire_operator_alert(
-                category="PaperAgent · Ollama",
-                summary="Local prepass: Ollama analyze failed (PREFER_LOCAL_LLM path).",
-                detail=format_exc_brief(exc),
-                dedupe_key="paper_agent_local_prepass_ollama",
+        resp = None
+        if self.deps.cerebras:
+            try:
+                resp = await self.deps.cerebras.analyze(enriched, system=system_prompt)
+            except Exception as exc:
+                log.error("Local-prepass Cerebras failed: %s", exc)
+                await fire_operator_alert(
+                    category="PaperAgent · Cerebras",
+                    summary="Local prepass: Cerebras analyze failed.",
+                    detail=format_exc_brief(exc),
+                    dedupe_key="paper_agent_local_prepass_cerebras",
+                )
+        if resp is None and self.deps.groq:
+            try:
+                resp = await self.deps.groq.analyze(enriched, system=system_prompt)
+            except Exception as exc:
+                log.error("Local-prepass Groq failed: %s", exc)
+                await fire_operator_alert(
+                    category="PaperAgent · Groq",
+                    summary="Local prepass: Groq analyze failed.",
+                    detail=format_exc_brief(exc),
+                    dedupe_key="paper_agent_local_prepass_groq",
+                )
+        if resp is None:
+            return ToolRunResult(
+                reasoning_text="No LLM available for prepass; returning empty decisions.",
+                decisions=[],
+                model="none",
+                iterations=0,
             )
-            raise
         elapsed = time.perf_counter() - t0
-        log.info("Local-prepass Ollama OK (%.1fs, model=%s)", elapsed, resp.model)
+        log.info("Local-prepass OK (%.1fs, model=%s)", elapsed, resp.model)
         reasoning, decisions = _extract_json_array(resp.text)
         return ToolRunResult(
             reasoning_text=reasoning or resp.text,
@@ -1578,4 +1585,3 @@ Return JSON decisions array.
             return float(v) if v is not None else None
         except Exception:
             return None
-

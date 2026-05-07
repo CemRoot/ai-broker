@@ -17,8 +17,8 @@ from app.core.logging import get_logger
 from app.memory.database import SupabaseDatabase
 from app.memory.retriever import RAGRetriever
 from app.services.paper.broker import PaperBroker
+from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
-from app.services.llm.ollama_service import OllamaService
 
 log = get_logger("tools.executor")
 
@@ -44,8 +44,8 @@ class ToolDeps:
     settings: Settings
     db: SupabaseDatabase | None
     http_client: Any  # httpx.AsyncClient (kept Any to avoid import cycles)
+    cerebras: CerebrasService | None
     groq: GroqService | None
-    ollama: OllamaService | None
     retriever: RAGRetriever | None
     paper_broker: PaperBroker | None
     # Faz 3d: `app/services/screener.py` will provide SPScreener; keep Any for now
@@ -118,9 +118,8 @@ class ToolExecutor:
         scored, model_used = await analyze_news_batch(
             symbol=ticker,
             articles=articles,
+            cerebras=self.deps.cerebras,
             groq=self.deps.groq,
-            ollama=self.deps.ollama,
-            prefer_local=bool(getattr(self.deps.settings, "prefer_local_llm", False)),
         )
 
         # Compact sentiment rollup
@@ -515,4 +514,3 @@ class ToolExecutor:
             return float(close.iloc[-1])
         except Exception:
             return None
-

@@ -1,5 +1,5 @@
 """
-LLM tool-calling runner (Groq primary, Ollama fallback).
+LLM tool-calling runner (Cerebras primary, Groq fallback).
 
 This module provides a generic loop:
 - ask model with `tools`
@@ -20,8 +20,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.logging import get_logger
-from app.services.llm.groq_service import GroqService, LLMResponse
-from app.services.llm.ollama_service import OllamaService
+from app.services.llm.cerebras_service import CerebrasService
+from app.services.llm.groq_service import GroqService
 from app.services.telegram_operator_alerts import fire_operator_alert, format_exc_brief
 from app.tools.executor import ToolExecutor
 
@@ -172,15 +172,10 @@ def _is_bad_request(exc: Exception) -> bool:
     return "error code: 400" in txt or "status=400" in txt or "badrequest" in txt
 
 
-def _is_ollama_memory_error(exc: Exception) -> bool:
-    txt = str(exc).lower()
-    return "more system memory" in txt or "model requires more system memory" in txt
-
-
 async def analyze_with_tools(
     *,
+    cerebras: CerebrasService | None,
     groq: GroqService | None,
-    ollama: OllamaService | None,
     tool_executor: ToolExecutor,
     system_prompt: str,
     user_message: str,
@@ -188,16 +183,103 @@ async def analyze_with_tools(
     max_iterations: int = 10,
 ) -> ToolRunResult:
     """
-    Returns reasoning + decisions (JSON array) using Groq tool calling when available.
-    Falls back to Ollama (no tools) if Groq is unavailable/fails.
+    Returns reasoning + decisions (JSON array) using Cerebras tool calling when available.
+    Falls back to Groq if Cerebras is unavailable/fails.
     """
     messages: list[dict[str, Any]] = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": user_message})
 
-    groq_failed = False
-    # ── Groq primary ────────────────────────────────────────────────
+    cerebras_failed = False
+    # ── Cerebras primary ─────────────────────────────────────────────
+    if cerebras:
+        t0 = time.perf_counter()
+        initial_messages_chars, tools_chars = _estimate_payload_chars(messages, tools)
+        try:
+            for i in range(max_iterations):
+                completion = await cerebras.create_chat_completion(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                )
+                msg = ((completion.get("choices") or [{}])[0].get("message") or {})
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": msg.get("content") or "",
+                }
+                if msg.get("tool_calls"):
+                    assistant_msg["tool_calls"] = msg.get("tool_calls")
+                messages.append(assistant_msg)
+
+                tool_calls = msg.get("tool_calls") or []
+                if tool_calls:
+                    for tc in tool_calls:
+                        fn = tc.get("function") or {}
+                        fn_name = fn.get("name") or ""
+                        fn_args = _coerce_tool_args(fn.get("arguments"))
+                        tool_out = await tool_executor.execute(fn_name, fn_args)
+
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc.get("id"),
+                                "name": fn_name,
+                                "content": tool_out,
+                            }
+                        )
+                    continue
+
+                # Final
+                text = str(msg.get("content") or "").strip()
+                reasoning, decisions = _extract_json_array(text)
+                elapsed = time.perf_counter() - t0
+                log.info("Cerebras tool-run OK | iters=%d | %.1fs", i + 1, elapsed)
+                return ToolRunResult(
+                    reasoning_text=reasoning,
+                    decisions=decisions,
+                    model=cerebras.model,
+                    iterations=i + 1,
+                )
+
+            return ToolRunResult(
+                reasoning_text="",
+                decisions=[],
+                model=cerebras.model,
+                iterations=max_iterations,
+            )
+        except Exception as exc:
+            cerebras_failed = True
+            final_messages_chars, _ = _estimate_payload_chars(messages, tools)
+            log.warning(
+                "Cerebras analyze_with_tools failed; fallback to Groq | model=%s iters=%d "
+                "msg_chars_initial=%d msg_chars_final=%d tools_chars=%d tool_count=%d | %s",
+                cerebras.model,
+                len(messages),
+                initial_messages_chars,
+                final_messages_chars,
+                tools_chars,
+                len(tools),
+                _error_detail(exc),
+            )
+            await fire_operator_alert(
+                category="LLM · Cerebras",
+                summary="analyze_with_tools: Cerebras failed — falling back to Groq.",
+                detail=format_exc_brief(exc),
+                dedupe_key="llm_cerebras_tool_fail",
+            )
+            if _is_rate_limited(exc) or _is_bad_request(exc):
+                return ToolRunResult(
+                    reasoning_text=(
+                        "Cerebras is temporarily unavailable (rate-limit or bad-request). "
+                        "Returning no-trade output to keep the agent loop alive."
+                    ),
+                    decisions=[],
+                    model=cerebras.model,
+                    iterations=len(messages),
+                )
+
+    # ── Groq fallback ────────────────────────────────────────────────
     if groq:
         t0 = time.perf_counter()
         initial_messages_chars, tools_chars = _estimate_payload_chars(messages, tools)
@@ -251,10 +333,9 @@ async def analyze_with_tools(
                 iterations=max_iterations,
             )
         except Exception as exc:
-            groq_failed = True
             final_messages_chars, _ = _estimate_payload_chars(messages, tools)
             log.warning(
-                "Groq analyze_with_tools failed; fallback to Ollama | model=%s iters=%d "
+                "Groq analyze_with_tools failed | model=%s iters=%d "
                 "msg_chars_initial=%d msg_chars_final=%d tools_chars=%d tool_count=%d | %s",
                 groq.model,
                 len(messages),
@@ -266,13 +347,11 @@ async def analyze_with_tools(
             )
             await fire_operator_alert(
                 category="LLM · Groq",
-                summary="analyze_with_tools: Groq failed — falling back to Ollama (no tool-calling on fallback path).",
+                summary="analyze_with_tools: Groq failed after Cerebras miss.",
                 detail=format_exc_brief(exc),
                 dedupe_key="llm_groq_tool_fail",
             )
             if _is_rate_limited(exc) or _is_bad_request(exc):
-                # Operational safety: when Groq is throttled, avoid cascading into
-                # heavy Ollama fallback paths that can fail on low-memory VPS nodes.
                 return ToolRunResult(
                     reasoning_text=(
                         "Groq is temporarily unavailable (rate-limit or bad-request). "
@@ -283,54 +362,22 @@ async def analyze_with_tools(
                     iterations=len(messages),
                 )
 
-    # ── Ollama fallback (no tool calling in this repo yet) ──────────
-    if ollama:
-        prompt = user_message
-        # Put system prompt on top to preserve instruction ordering.
-        system = system_prompt or None
-        try:
-            resp: LLMResponse = await ollama.analyze(prompt, system=system)
-        except Exception as exc:
-            log.error("Ollama analyze_with_tools fallback failed: %s", exc)
-            await fire_operator_alert(
-                category="LLM · Ollama",
-                summary="analyze_with_tools: Ollama failed (after Groq error or Groq disabled).",
-                detail=format_exc_brief(exc),
-                dedupe_key="llm_ollama_tool_fail",
-            )
-            if _is_ollama_memory_error(exc):
-                return ToolRunResult(
-                    reasoning_text=(
-                        "Ollama model could not run due to host memory limits. "
-                        "Returning no-trade output to keep the agent loop alive."
-                    ),
-                    decisions=[],
-                    model=getattr(ollama, "model", "ollama"),
-                    iterations=1,
-                )
-            raise
-        reasoning, decisions = _extract_json_array(resp.text)
-        return ToolRunResult(
-            reasoning_text=reasoning,
-            decisions=decisions,
-            model=resp.model,
-            iterations=1,
-        )
-
-    if not groq and not ollama:
+    if not cerebras and not groq:
         await fire_operator_alert(
             category="LLM",
-            summary="analyze_with_tools: Groq and Ollama are both unavailable (not configured).",
+            summary="analyze_with_tools: Cerebras and Groq are both unavailable (not configured).",
             dedupe_key="llm_no_providers",
         )
-    elif groq_failed and not ollama:
-        # Groq failure was already alerted above; Ollama missing — no second ping.
+    elif cerebras_failed and not groq:
+        # Cerebras failure was already alerted above; Groq missing — no second ping.
         pass
 
     return ToolRunResult(
-        reasoning_text="ERROR: No LLM available (Groq disabled and Ollama not configured).",
+        reasoning_text=(
+            "No LLM available (Cerebras/Groq offline). "
+            "Returning empty decisions to keep the agent loop alive."
+        ),
         decisions=[],
         model="none",
         iterations=0,
     )
-

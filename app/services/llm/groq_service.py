@@ -1,5 +1,5 @@
 """
-Groq LLM service — primary analysis engine.
+Groq LLM service — fallback analysis engine.
 
 Model: ``llama-3.3-70b-versatile`` (Faz 0 kapanış kararı).
 Includes usage tracking (token counters) and structured logging.

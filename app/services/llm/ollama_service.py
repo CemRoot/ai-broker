@@ -1,5 +1,5 @@
 """
-Ollama LLM service — fallback when Groq is unavailable.
+Legacy Ollama LLM service (no longer used for generation in Faz 3+).
 
 Model: ``deepseek-r1:14b`` (Faz 0 kapanış kararı).
 """

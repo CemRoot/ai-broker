@@ -34,23 +34,25 @@ class Settings(BaseSettings):
     #: Cooldown for repeating low-remaining warning logs (seconds).
     t212_remaining_log_cooldown_sec: float = 30.0
 
-    # ── LLM — Groq (primary) ────────────────────────────────────────
+    # ── LLM — Cerebras (primary) ────────────────────────────────────
+    cerebras_enabled: bool = True
+    cerebras_api_key: str = ""
+    cerebras_base_url: str = "https://api.cerebras.ai/v1"
+    cerebras_model: str = "llama3.1-8b"
+
+    # ── LLM — Groq (fallback) ───────────────────────────────────────
     #: Hard switch to disable Groq even when GROQ_API_KEY is present.
     groq_enabled: bool = True
     groq_api_key: str = ""
 
-    # ── LLM — Ollama (fallback) ─────────────────────────────────────
+    # ── Ollama (embeddings only) ────────────────────────────────────
     ollama_base_url: str = "http://localhost:11434"
     #: Optional secondary Ollama endpoint for failover (e.g. remote Mac tunnel URL).
     ollama_backup_base_url: str = ""
     ollama_model: str = "deepseek-r1:14b"
-    #: When true, the PaperAgent skips Groq and runs a local-prepass cycle:
-    #: Python-side fans out ``get_macro_context``, ``get_portfolio``, ``screen_stocks``,
-    #: and per-ticker ``get_technical`` / ``get_news`` / ``get_memories`` (real data),
-    #: then asks Ollama once with the combined context. Used to keep Groq tokens
-    #: untouched on dev machines (Apple Silicon Metal backend).
+    #: Legacy local-prepass toggle (no longer used; kept for backward-compatible envs).
     prefer_local_llm: bool = False
-    #: Ticker count cap for local-prepass screener candidates per cycle (keeps prompt small).
+    #: Legacy local-prepass ticker cap (unused).
     paper_local_prepass_top_k: int = 5
 
     # ── Telegram ────────────────────────────────────────────────────

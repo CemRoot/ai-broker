@@ -17,8 +17,8 @@ async def test_tool_executor_unknown_tool():
         settings=Settings(),
         db=None,
         http_client=None,
+        cerebras=None,
         groq=None,
-        ollama=None,
         retriever=None,
         paper_broker=None,
         screener=None,
@@ -37,8 +37,8 @@ async def test_check_t212_equity_instrument_tool_skipped_when_not_t212_mode():
         settings=s,
         db=None,
         http_client=None,
+        cerebras=None,
         groq=None,
-        ollama=None,
         retriever=None,
         paper_broker=None,
         screener=None,
@@ -57,8 +57,8 @@ async def test_check_t212_equity_instrument_tool_ok_when_t212_mode():
         settings=s,
         db=None,
         http_client=None,
+        cerebras=None,
         groq=None,
-        ollama=None,
         retriever=None,
         paper_broker=None,
         screener=None,
@@ -69,4 +69,3 @@ async def test_check_t212_equity_instrument_tool_ok_when_t212_mode():
     assert "OK" in ok_line
     no_line = await ex.execute("check_t212_equity_instrument", {"ticker": "ZZZ"})
     assert "NO" in no_line
-
