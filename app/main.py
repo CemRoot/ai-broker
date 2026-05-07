@@ -25,6 +25,7 @@ from app.core.logging import get_logger, setup_logging
 from app.services.t212.client import T212Client
 from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
+from app.services.llm.ollama_service import OllamaService
 from app.bot.app import build_bot_application, install_bot_menu, register_handlers
 from app.api.routes import router as api_router
 from app.web.routes import router as web_router
@@ -114,6 +115,7 @@ async def lifespan(app: FastAPI):
         else None
     )
     groq_svc = GroqService(settings) if (settings.groq_enabled and settings.groq_api_key) else None
+    ollama_svc = OllamaService(settings)
     if cerebras_svc:
         log.info("Cerebras service ready — model=%s", cerebras_svc.model)
     else:
@@ -128,6 +130,7 @@ async def lifespan(app: FastAPI):
             log.warning("GROQ_ENABLED=false — Groq disabled")
         else:
             log.warning("GROQ_API_KEY empty — Groq disabled")
+    log.info("Ollama fallback ready — model=%s", ollama_svc.model)
 
     # ── RAG retriever (must exist before Telegram handler registration) ──
     # register_handlers stores ``retriever`` in ``bot_data``. Previously it was
@@ -165,6 +168,7 @@ async def lifespan(app: FastAPI):
             http_client=http_client,
             cerebras=cerebras_svc,
             groq=groq_svc,
+            ollama=ollama_svc,
             retriever=retriever,
             paper_broker=paper_broker,
             screener=screener,

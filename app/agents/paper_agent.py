@@ -23,6 +23,7 @@ from app.memory.database import SupabaseDatabase
 from app.memory.retriever import RAGRetriever
 from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
+from app.services.llm.ollama_service import OllamaService
 from app.services.llm.tool_calling import (
     ToolRunResult,
     _extract_json_array,
@@ -198,6 +199,7 @@ class PaperAgentDeps:
     paper_broker: PaperBroker
     cerebras: CerebrasService | None
     groq: GroqService | None
+    ollama: OllamaService | None
     retriever: RAGRetriever | None
     tool_executor: ToolExecutor
     market_clock: MarketClock
@@ -366,6 +368,25 @@ Use tools to gather data. Follow the trading rules.
             tools=TOOLS,
             max_iterations=10,
         )
+        if (
+            not (result.decisions or [])
+            and "temporarily unavailable" in (result.reasoning_text or "").lower()
+            and self.deps.ollama is not None
+        ):
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H6",
+                location="app/agents/paper_agent.py:370",
+                message="fallback to local prepass via ollama",
+                data={"event_type": event_type, "model_before": result.model},
+            )
+            # endregion
+            result = await self._run_cycle_local_prepass(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                macro_snip=macro_snip or "",
+            )
 
         analysis_text = (result.reasoning_text or "").strip()
         decisions = result.decisions or []
@@ -543,6 +564,25 @@ Return JSON decisions array.
                 tools=TOOLS,
                 max_iterations=10,
             )
+            if (
+                not (result.decisions or [])
+                and "temporarily unavailable" in (result.reasoning_text or "").lower()
+                and self.deps.ollama is not None
+            ):
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H6",
+                    location="app/agents/paper_agent.py:548",
+                    message="emergency fallback to local prepass via ollama",
+                    data={"trigger": trigger, "model_before": result.model},
+                )
+                # endregion
+                result = await self._run_cycle_local_prepass(
+                    system_prompt=build_paper_system_prompt(acct_cur),
+                    user_message=user_message,
+                    macro_snip=macro_snip or "",
+                )
             analysis_text = (result.reasoning_text or "").strip()
             decisions = result.decisions or []
             await self._save_cycle_log(event_type=f"EMERGENCY:{trigger}", analysis=analysis_text, decisions=decisions)
@@ -1433,6 +1473,17 @@ Return JSON decisions array.
                     summary="Local prepass: Groq analyze failed.",
                     detail=format_exc_brief(exc),
                     dedupe_key="paper_agent_local_prepass_groq",
+                )
+        if resp is None and self.deps.ollama:
+            try:
+                resp = await self.deps.ollama.analyze(enriched, system=system_prompt)
+            except Exception as exc:
+                log.error("Local-prepass Ollama failed: %s", exc)
+                await fire_operator_alert(
+                    category="PaperAgent · Ollama",
+                    summary="Local prepass: Ollama analyze failed.",
+                    detail=format_exc_brief(exc),
+                    dedupe_key="paper_agent_local_prepass_ollama",
                 )
         if resp is None:
             return ToolRunResult(

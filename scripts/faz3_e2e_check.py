@@ -133,6 +133,7 @@ async def _optional_llm_cycle(skip: bool) -> tuple[bool, str]:
                 settings=settings,
                 db=db,
                 paper_broker=paper_broker,
+                cerebras=None,
                 groq=groq_svc,
                 ollama=ollama_svc,
                 retriever=None,

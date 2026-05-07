@@ -48,6 +48,7 @@ async def test_run_emergency_cycle_calls_llm_pipeline():
         paper_broker=broker,
         cerebras=MagicMock(),
         groq=MagicMock(),
+        ollama=None,
         retriever=None,
         tool_executor=tool_x,
         market_clock=MarketClock(),

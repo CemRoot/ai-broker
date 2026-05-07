@@ -92,6 +92,7 @@ async def main() -> int:
                 settings=settings,
                 db=db,
                 paper_broker=paper_broker,
+                cerebras=None,
                 groq=groq,
                 ollama=ollama,
                 retriever=retriever,

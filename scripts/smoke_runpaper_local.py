@@ -104,6 +104,7 @@ async def _run(*, allow_trades: bool) -> int:
                 settings=settings,
                 db=db,
                 paper_broker=paper_broker,
+                cerebras=None,
                 groq=groq_svc,
                 ollama=ollama_svc,
                 retriever=retriever,
