@@ -411,15 +411,21 @@ Use tools to gather data. Follow the trading rules.
 
         analysis_text = (result.reasoning_text or "").strip()
         decisions = result.decisions or []
+        action_counts: dict[str, int] = {}
+        for _d in decisions:
+            _a = str(_d.get("action", "")).upper().strip() or "UNKNOWN"
+            action_counts[_a] = action_counts.get(_a, 0) + 1
         # region agent log
         debug_probe(
             run_id="pre-fix",
-            hypothesis_id="H4",
+            hypothesis_id="H7",
             location="app/agents/paper_agent.py:365",
             message="run_cycle decisions parsed",
             data={
                 "event_type": event_type,
+                "allow_trades": bool(allow_trades),
                 "decisions_count": len(decisions),
+                "action_counts": action_counts,
                 "first_rows": [
                     {
                         "ticker": str(d.get("ticker", "")),
@@ -639,16 +645,52 @@ Return JSON decisions array.
         ticker = str(d.get("ticker", "")).upper().strip()
         if ticker and not _is_plausible_trade_ticker(ticker):
             log.warning("Skipping decision with implausible ticker: %r", ticker)
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H8",
+                location="app/agents/paper_agent.py:_apply_decision",
+                message="decision rejected",
+                data={"ticker": ticker, "action": action, "reason": "implausible_ticker"},
+            )
+            # endregion
             return None
         if not ticker or action not in ("BUY", "SELL", "HOLD", "SKIP"):
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H8",
+                location="app/agents/paper_agent.py:_apply_decision",
+                message="decision rejected",
+                data={"ticker": ticker, "action": action, "reason": "invalid_action_or_ticker"},
+            )
+            # endregion
             return None
 
         confidence = float(d.get("confidence", 0.0) or 0.0)
         if confidence < 0.60 and action in ("BUY", "SELL"):
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H8",
+                location="app/agents/paper_agent.py:_apply_decision",
+                message="decision rejected",
+                data={"ticker": ticker, "action": action, "reason": "confidence_gate", "confidence": confidence},
+            )
+            # endregion
             return None
 
         shares = float(d.get("shares", 0.0) or 0.0)
         if action in ("BUY", "SELL") and shares <= 0:
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H8",
+                location="app/agents/paper_agent.py:_apply_decision",
+                message="decision rejected",
+                data={"ticker": ticker, "action": action, "reason": "non_positive_shares", "shares": shares},
+            )
+            # endregion
             return None
 
         # Order routing: MARKET (default), LIMIT, STOP, STOP_LIMIT.
@@ -764,6 +806,15 @@ Return JSON decisions array.
         if action == "BUY":
             if halt_new_buys:
                 log.warning("Skipping BUY %s: max drawdown halt active", ticker)
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H8",
+                    location="app/agents/paper_agent.py:_apply_decision",
+                    message="decision rejected",
+                    data={"ticker": ticker, "action": action, "reason": "max_drawdown_halt"},
+                )
+                # endregion
                 return None
             if self.deps.settings.paper_executes_on_t212 and self.deps.t212:
                 ok_sym, why = await self.deps.t212.is_us_equity_instrument_tradeable(ticker)
@@ -800,6 +851,15 @@ Return JSON decisions array.
                     "Skipping BUY %s [%s]: reward/risk %.2f < 2.0 (target=%.4f stop=%.4f entry=%.4f)",
                     ticker, order_type, rr, target_f, stop_loss_f, entry_for_risk,
                 )
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H8",
+                    location="app/agents/paper_agent.py:_apply_decision",
+                    message="decision rejected",
+                    data={"ticker": ticker, "action": action, "reason": "rr_below_min", "rr": rr},
+                )
+                # endregion
                 return None
             if self.deps.settings.paper_executes_on_t212:
                 if not self.deps.t212:
