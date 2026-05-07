@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`2026-05-07T12:10:00+01:00`:** **Debug mode runtime probe enstrümantasyonu eklendi (LLM zinciri / PaperAgent / MarketClock).** `app/core/debug_probe.py` ile session NDJSON debug log yazımı (`.cursor/debug-312392.log`) aktif edildi; `app/services/llm/tool_calling.py`, `app/agents/paper_agent.py` ve `app/services/market_clock.py` içine hipotez bazlı `debug_probe` noktaları eklendi (provider seçimi, no-trade branch, karar parse sayısı, event/tick akışı). Amaç: market-open sessizlik ve provider fallback kırılmasını koddan tahmin yerine runtime kanıtla izlemek.
+
 - **`2026-05-06T16:41:00+01:00`:** **PaperAgent cycle frekansı env ile yönetilebilir oldu.** `paper_regular_tick_seconds` / `PAPER_REGULAR_TICK_SECONDS` eklendi (varsayılan 300s = 5 dakika). `app/main.py` `MarketClock` kurulumunda bu değeri kullanır; regular session’da daha sık heartbeat/cycle için artık kod değişmeden env’den ayarlanır.
 
 - **`2026-05-06T16:36:00+01:00`:** **Groq hard-disable anahtarı eklendi (`GROQ_ENABLED`).** `app/core/config.py` içine `groq_enabled` ayarı eklendi (varsayılan `true`). `app/main.py` artık Groq servisini yalnızca `GROQ_ENABLED=true` ve `GROQ_API_KEY` birlikteyse başlatır; aksi halde kesin olarak Ollama-only modda açılır. `/health` içindeki `groq_configured` alanı da bu bayrağı dikkate alacak şekilde güncellendi. `.env.example` yeni `GROQ_ENABLED` satırıyla güncellendi.

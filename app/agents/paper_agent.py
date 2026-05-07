@@ -18,6 +18,7 @@ from typing import Any
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.core.debug_probe import debug_probe
 from app.memory.database import SupabaseDatabase
 from app.memory.retriever import RAGRetriever
 from app.services.llm.cerebras_service import CerebrasService
@@ -316,6 +317,15 @@ class PaperAgent:
         }
 
     async def run_cycle(self, event_type: str, *, allow_trades: bool = True) -> tuple[str, list[dict[str, Any]]]:
+        # region agent log
+        debug_probe(
+            run_id="pre-fix",
+            hypothesis_id="H3",
+            location="app/agents/paper_agent.py:319",
+            message="run_cycle entry",
+            data={"event_type": event_type, "allow_trades": bool(allow_trades)},
+        )
+        # endregion
         self._reset_emergency_count_if_new_et_day()
         acct_cur = await self._resolve_account_currency()
         punish_block = await self._active_punishments_prompt_block()
@@ -359,6 +369,26 @@ Use tools to gather data. Follow the trading rules.
 
         analysis_text = (result.reasoning_text or "").strip()
         decisions = result.decisions or []
+        # region agent log
+        debug_probe(
+            run_id="pre-fix",
+            hypothesis_id="H4",
+            location="app/agents/paper_agent.py:365",
+            message="run_cycle decisions parsed",
+            data={
+                "event_type": event_type,
+                "decisions_count": len(decisions),
+                "first_rows": [
+                    {
+                        "ticker": str(d.get("ticker", "")),
+                        "action": str(d.get("action", "")),
+                        "confidence": d.get("confidence"),
+                    }
+                    for d in decisions[:3]
+                ],
+            },
+        )
+        # endregion
 
         # If punishments are active, force-skip punished tickers.
         if self.deps.punishment_engine and decisions:

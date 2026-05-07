@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.logging import get_logger
+from app.core.debug_probe import debug_probe
 from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
 from app.services.telegram_operator_alerts import fire_operator_alert, format_exc_brief
@@ -190,6 +191,19 @@ async def analyze_with_tools(
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": user_message})
+    # region agent log
+    debug_probe(
+        run_id="pre-fix",
+        hypothesis_id="H1",
+        location="app/services/llm/tool_calling.py:196",
+        message="analyze_with_tools entry provider flags",
+        data={
+            "has_cerebras": bool(cerebras),
+            "has_groq": bool(groq),
+            "tool_count": len(tools),
+        },
+    )
+    # endregion
 
     cerebras_failed = False
     # ── Cerebras primary ─────────────────────────────────────────────
@@ -198,6 +212,15 @@ async def analyze_with_tools(
         initial_messages_chars, tools_chars = _estimate_payload_chars(messages, tools)
         try:
             for i in range(max_iterations):
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H1",
+                    location="app/services/llm/tool_calling.py:212",
+                    message="cerebras request attempt",
+                    data={"model": cerebras.model, "iter": i + 1},
+                )
+                # endregion
                 completion = await cerebras.create_chat_completion(
                     messages=messages,
                     tools=tools,
@@ -233,6 +256,15 @@ async def analyze_with_tools(
                 # Final
                 text = str(msg.get("content") or "").strip()
                 reasoning, decisions = _extract_json_array(text)
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H4",
+                    location="app/services/llm/tool_calling.py:248",
+                    message="cerebras final parse",
+                    data={"decisions_count": len(decisions)},
+                )
+                # endregion
                 elapsed = time.perf_counter() - t0
                 log.info("Cerebras tool-run OK | iters=%d | %.1fs", i + 1, elapsed)
                 return ToolRunResult(
@@ -250,6 +282,15 @@ async def analyze_with_tools(
             )
         except Exception as exc:
             cerebras_failed = True
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H1",
+                location="app/services/llm/tool_calling.py:268",
+                message="cerebras exception",
+                data={"error": str(exc)[:220]},
+            )
+            # endregion
             final_messages_chars, _ = _estimate_payload_chars(messages, tools)
             log.warning(
                 "Cerebras analyze_with_tools failed; fallback to Groq | model=%s iters=%d "
@@ -269,6 +310,18 @@ async def analyze_with_tools(
                 dedupe_key="llm_cerebras_tool_fail",
             )
             if _is_rate_limited(exc) or _is_bad_request(exc):
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H2",
+                    location="app/services/llm/tool_calling.py:312",
+                    message="cerebras safe no-trade return",
+                    data={
+                        "reason": "rate_limited_or_bad_request",
+                        "groq_available": bool(groq),
+                    },
+                )
+                # endregion
                 return ToolRunResult(
                     reasoning_text=(
                         "Cerebras is temporarily unavailable (rate-limit or bad-request). "
@@ -317,6 +370,15 @@ async def analyze_with_tools(
                 # Final
                 text = (msg.content or "").strip()
                 reasoning, decisions = _extract_json_array(text)
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H4",
+                    location="app/services/llm/tool_calling.py:356",
+                    message="groq final parse",
+                    data={"decisions_count": len(decisions)},
+                )
+                # endregion
                 elapsed = time.perf_counter() - t0
                 log.info("Groq tool-run OK | iters=%d | %.1fs", i + 1, elapsed)
                 return ToolRunResult(
@@ -352,6 +414,15 @@ async def analyze_with_tools(
                 dedupe_key="llm_groq_tool_fail",
             )
             if _is_rate_limited(exc) or _is_bad_request(exc):
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H2",
+                    location="app/services/llm/tool_calling.py:404",
+                    message="groq safe no-trade return",
+                    data={"reason": "rate_limited_or_bad_request"},
+                )
+                # endregion
                 return ToolRunResult(
                     reasoning_text=(
                         "Groq is temporarily unavailable (rate-limit or bad-request). "
@@ -363,12 +434,30 @@ async def analyze_with_tools(
                 )
 
     if not cerebras and not groq:
+        # region agent log
+        debug_probe(
+            run_id="pre-fix",
+            hypothesis_id="H2",
+            location="app/services/llm/tool_calling.py:416",
+            message="no providers configured",
+            data={},
+        )
+        # endregion
         await fire_operator_alert(
             category="LLM",
             summary="analyze_with_tools: Cerebras and Groq are both unavailable (not configured).",
             dedupe_key="llm_no_providers",
         )
     elif cerebras_failed and not groq:
+        # region agent log
+        debug_probe(
+            run_id="pre-fix",
+            hypothesis_id="H2",
+            location="app/services/llm/tool_calling.py:422",
+            message="cerebras failed and groq disabled_or_missing",
+            data={},
+        )
+        # endregion
         # Cerebras failure was already alerted above; Groq missing — no second ping.
         pass
 

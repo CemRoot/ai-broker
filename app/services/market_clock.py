@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.logging import get_logger
+from app.core.debug_probe import debug_probe
 
 log = get_logger("market_clock")
 
@@ -144,6 +145,15 @@ class MarketClock:
             pending = self._next_unfired_event(now)
             if pending:
                 self._mark_fired(pending.event_type)
+                # region agent log
+                debug_probe(
+                    run_id="pre-fix",
+                    hypothesis_id="H5",
+                    location="app/services/market_clock.py:151",
+                    message="market_open pending event fired",
+                    data={"event_type": pending.event_type, "now_et": now.isoformat()},
+                )
+                # endregion
                 return pending.event_type, self.regular_tick_seconds
 
             next_ev_dt, next_ev_type = self.next_decision_event(now)
@@ -158,6 +168,15 @@ class MarketClock:
             sleep_s = min(self.regular_tick_seconds, max(1, to_ev))
             await asyncio.sleep(sleep_s)
             # We may have crossed into event time; caller will re-check next loop.
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H3",
+                location="app/services/market_clock.py:171",
+                message="market_open tick sleep",
+                data={"sleep_s": sleep_s, "now_et": now.isoformat()},
+            )
+            # endregion
             return "TICK", self.regular_tick_seconds
 
         nxt_open = self.next_open(now)
@@ -168,6 +187,15 @@ class MarketClock:
         if now < pre_start:
             sleep_s = max(1, int((pre_start - now).total_seconds()))
             log.info("MarketClock sleeping until premarket window (%ss)", sleep_s)
+            # region agent log
+            debug_probe(
+                run_id="pre-fix",
+                hypothesis_id="H5",
+                location="app/services/market_clock.py:181",
+                message="market_closed sleep to premarket",
+                data={"sleep_s": sleep_s, "now_et": now.isoformat(), "next_open_et": nxt_open.isoformat()},
+            )
+            # endregion
             await asyncio.sleep(sleep_s)
             return "PREMARKET", self.premarket_tick_seconds
 
