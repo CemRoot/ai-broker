@@ -10,7 +10,7 @@ Telegram bot.
 [![ci](https://github.com/CemRoot/ai-broker/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CemRoot/ai-broker/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![framework](https://img.shields.io/badge/FastAPI-%E2%9A%A1-009688?logo=fastapi&logoColor=white)](app/main.py)
-[![llm](https://img.shields.io/badge/LLM-Groq%20%2B%20Ollama-FF6B6B)](app/services/llm)
+[![llm](https://img.shields.io/badge/LLM-Cerebras%20%2B%20Groq-FF6B6B)](app/services/llm)
 [![db](https://img.shields.io/badge/Supabase-pgvector-3ECF8E?logo=supabase&logoColor=white)](sql/schemas)
 [![docker](https://img.shields.io/badge/Docker-multi--stage-2496ED?logo=docker&logoColor=white)](Dockerfile)
 
@@ -51,7 +51,7 @@ Telegram bot.
 | Talk to the operator via a menu-driven, free-text-aware **Telegram** bot | [`app/bot`](app/bot) |
 | Surface a small browser UI for ad-hoc analysis | `WEB_UI_ENABLED=true` → `GET /ui` |
 
-LLM strategy: **Groq `llama-3.3-70b-versatile`** primary, **Ollama `deepseek-r1:14b`** local fallback, **`nomic-embed-text`** for 768-dim embeddings. Set `PREFER_LOCAL_LLM=true` to route Paper Agent / news scoring through Ollama first and keep Groq tokens for emergencies.
+LLM strategy: **Cerebras `llama3.1-8b`** primary, **Groq `llama-3.3-70b-versatile`** fallback, **Ollama `nomic-embed-text`** for 768-dim embeddings.
 
 ---
 
@@ -77,8 +77,9 @@ flowchart LR
     end
 
     subgraph LLM["LLM layer"]
+        CBR[Cerebras llama3.1-8b]
         GROQ[Groq llama-3.3-70b]
-        OLL[Ollama deepseek-r1:14b<br/>+ nomic-embed-text]
+        OLL[Ollama nomic-embed-text<br/>(embeddings)]
     end
 
     subgraph MEM["Supabase + pgvector"]
@@ -137,7 +138,7 @@ sequenceDiagram
     participant AG as PaperAgent
     participant TX as ToolExecutor
     participant RAG as Supabase RAG
-    participant LLM as LLM (Ollama → Groq)
+    participant LLM as LLM (Cerebras → Groq)
     participant T212 as Trading 212 demo
     participant PUN as PunishmentEngine
     participant TG as Telegram
@@ -217,7 +218,9 @@ Minimal viable Phase 2 setup needs at least these keys:
 
 | Variable | Purpose |
 |---|---|
-| `GROQ_API_KEY` | Primary LLM ([console.groq.com](https://console.groq.com)) |
+| `CEREBRAS_API_KEY` | Primary LLM ([api.cerebras.ai](https://api.cerebras.ai)) |
+| `CEREBRAS_MODEL` | Cerebras model name (`llama3.1-8b`) |
+| `GROQ_API_KEY` | Fallback LLM ([console.groq.com](https://console.groq.com)) |
 | `T212_DEMO_API_KEY` / `T212_DEMO_API_SECRET` | Trading 212 → Settings → API. Required scopes: `account`, `portfolio`, `orders:read`, `orders:execute`, `history:orders`. |
 | `T212_BASE_URL` | `https://demo.trading212.com` (recommended) or `https://live.trading212.com` |
 | `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather) |
@@ -225,11 +228,10 @@ Minimal viable Phase 2 setup needs at least these keys:
 | `TELEGRAM_DISPLAY_SECONDARY_TZ` | Optional IANA zone for a second clock in PaperAgent Telegram lines (default `Europe/Dublin`; empty = ET only) |
 | `TELEGRAM_OPERATOR_ALERTS_ENABLED` | `true` (default): push LLM/PaperAgent failures to the same allow-list as bot commands (`TELEGRAM_OPERATOR_ALERT_COOLDOWN_SEC` dedupes floods) |
 | `SUPABASE_DB_URL` | `postgresql://...` connection string (asyncpg + pgvector) |
-| `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | Local fallback LLM (`http://localhost:11434`, `deepseek-r1:14b`) |
+| `OLLAMA_BASE_URL` / `OLLAMA_EMBED_MODEL` | Embeddings only (`http://localhost:11434`, `nomic-embed-text`) |
 | `FINNHUB_API_KEY` | News & sentiment ([finnhub.io](https://finnhub.io)) |
 | `INTERNAL_API_KEY` | If set, all `/internal/*` requests must send `X-Internal-Api-Key` |
 | `TELEGRAM_WEBHOOK_URL` / `TELEGRAM_WEBHOOK_SECRET` | Webhook mode (production); leave URL empty for polling |
-| `PREFER_LOCAL_LLM` | `true` → Paper Agent + news scoring use Ollama first, Groq only on failure |
 | `PAPER_EXECUTES_ON_T212` | `true` to mirror Paper Agent orders into T212 demo |
 | `USE_TOON_PROMPTS` | `true` → numeric tables sent to LLMs are TOON-packed (~10–15% token saving) |
 
@@ -271,7 +273,7 @@ Detailed deploy / Cloudflare Tunnel / server sizing (Hetzner CX22 vs GEX44): [`d
 
 ## 7. Telegram bot
 
-Type any free-text message → routed to Ollama as a quick answer.
+Type any free-text message → routed to Cerebras (fallback Groq) as a quick answer.
 
 | Command | Effect |
 |---|---|
@@ -323,7 +325,7 @@ The bot is a **stateful long-running process** (FastAPI + asyncio + WebSocket cl
 | Trump posts when the WebSocket is silent (e.g. bot account does not follow Trump) | **GitHub Actions cron** every 5 min → `POST /internal/trump/pull` | Guarantees coverage independent of WebSocket |
 | Hourly liveness probe + email-on-failure | **GitHub Actions cron** every hour → `GET /health` | Free 24/7 monitoring, no Pingdom needed |
 | CI on push / PR | **GitHub Actions** (`ci.yml`) — ruff + pytest (`-m "not ollama"`) | Runners have no Ollama; full embedding checks stay local |
-| Heavy local LLM (Ollama 14B at 7×24) | Optional **Hetzner GEX44** (€189/mo) per [`docs/FAZ4_DEPLOY.md`](docs/FAZ4_DEPLOY.md) | Only if you want to eliminate Groq tokens entirely |
+| Heavy local Ollama (embeddings + experimentation) | Optional **Hetzner GEX44** (€189/mo) per [`docs/FAZ4_DEPLOY.md`](docs/FAZ4_DEPLOY.md) | Only if you want to host embeddings locally or run model experiments |
 
 The three workflow files live in [`.github/workflows/`](.github/workflows). They need only two repository secrets — `AIBROKER_BASE_URL` and `AIBROKER_INTERNAL_KEY` — both set in **Settings → Secrets and variables → Actions**.
 
@@ -341,7 +343,7 @@ uv run pytest tests/unit -q -m "not ollama"
 # Lint
 uv run ruff check app tests scripts
 
-# Live single Paper Agent cycle (T212 + Ollama + Supabase, dry-run = no orders)
+# Live single Paper Agent cycle (T212 + Cerebras/Groq + Supabase, dry-run = no orders)
 PYTHONPATH=. uv run python scripts/live_paper_cycle.py --no-trades
 
 # Same script but actually places T212 demo orders

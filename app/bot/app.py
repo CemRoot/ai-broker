@@ -63,8 +63,8 @@ def register_handlers(
     application: Application,
     *,
     t212=None,
+    cerebras=None,
     groq=None,
-    ollama=None,
     retriever=None,
     settings: Settings | None = None,
     http_client=None,
@@ -74,8 +74,8 @@ def register_handlers(
 ) -> None:
     """Register all command handlers and inject service references into bot_data."""
     application.bot_data["t212"] = t212
+    application.bot_data["cerebras"] = cerebras
     application.bot_data["groq"] = groq
-    application.bot_data["ollama"] = ollama
     application.bot_data["retriever"] = retriever
     application.bot_data["settings"] = settings
     application.bot_data["http_client"] = http_client

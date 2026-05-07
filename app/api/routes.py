@@ -87,6 +87,11 @@ def build_health_payload(*, settings, db, bot_app) -> dict:
                 getattr(db, "last_connect_error", None) if db else None
             ),
         },
+        "cerebras_configured": bool(
+            settings
+            and getattr(settings, "cerebras_enabled", True)
+            and getattr(settings, "cerebras_api_key", "")
+        ),
         "groq_configured": bool(
             settings and getattr(settings, "groq_enabled", True) and settings.groq_api_key
         ),
@@ -175,10 +180,10 @@ async def internal_technical_extended(request: Request, symbol: str):
     dependencies=[Depends(require_internal_api_key)],
 )
 async def internal_news_batch(request: Request, body: NewsBatchRequest):
-    """Score submitted articles with Layer-1-style Groq batch (optional Ollama fallback)."""
+    """Score submitted articles with Layer-1-style batch (Cerebras primary, Groq fallback)."""
     groq_svc = request.app.state.groq
-    ollama_svc = request.app.state.ollama
-    if not groq_svc and not ollama_svc:
+    cerebras_svc = request.app.state.cerebras
+    if not cerebras_svc and not groq_svc:
         raise HTTPException(503, "No LLM service available")
 
     articles = [a.model_dump() for a in body.articles]
@@ -186,8 +191,8 @@ async def internal_news_batch(request: Request, body: NewsBatchRequest):
         merged, model = await analyze_news_batch(
             symbol=body.symbol,
             articles=articles,
+            cerebras=cerebras_svc,
             groq=groq_svc,
-            ollama=ollama_svc,
         )
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
@@ -210,11 +215,11 @@ async def internal_news_analyze(
     settings = request.app.state.settings
     http = request.app.state.http_client
     groq_svc = request.app.state.groq
-    ollama_svc = request.app.state.ollama
+    cerebras_svc = request.app.state.cerebras
 
     if not settings.finnhub_api_key:
         raise HTTPException(503, "FINNHUB_API_KEY not configured")
-    if not groq_svc and not ollama_svc:
+    if not cerebras_svc and not groq_svc:
         raise HTTPException(503, "No LLM service available")
 
     lim = max(1, min(limit, 50))
@@ -238,8 +243,8 @@ async def internal_news_analyze(
         merged, model = await analyze_news_batch(
             symbol=sym,
             articles=articles,
+            cerebras=cerebras_svc,
             groq=groq_svc,
-            ollama=ollama_svc,
         )
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
@@ -269,8 +274,8 @@ async def internal_analyze(
         settings=request.app.state.settings,
         http_client=request.app.state.http_client,
         t212=request.app.state.t212,
+        cerebras=request.app.state.cerebras,
         groq=request.app.state.groq,
-        ollama=request.app.state.ollama,
         retriever=getattr(request.app.state, 'retriever', None),
         include_news=include_news,
         include_extended_technical=extended,

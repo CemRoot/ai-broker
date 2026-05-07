@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.logging import get_logger
+from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
-from app.services.llm.ollama_service import OllamaService
 from app.services.paper.broker import PaperBroker
 from app.services.paper.models import PaperPosition
 from app.services.t212.client import T212Client
@@ -33,15 +33,15 @@ class PositionMonitor:
         self,
         *,
         paper_broker: PaperBroker,
+        cerebras: CerebrasService | None,
         groq: GroqService | None,
-        ollama: OllamaService | None,
         tool_executor: ToolExecutor,
         t212: T212Client | None = None,
         paper_executes_on_t212: bool = False,
     ) -> None:
         self._broker = paper_broker
+        self._cerebras = cerebras
         self._groq = groq
-        self._ollama = ollama
         self._tools = tool_executor
         self._t212 = t212
         self._paper_executes_on_t212 = paper_executes_on_t212
@@ -107,15 +107,15 @@ Has the invalidation condition been MET now? If unsure, answer met=false."""
         return forced
 
     async def _ask_llm(self, prompt: str) -> InvalidationResult:
-        if self._groq:
+        if self._cerebras:
             try:
-                resp = await self._groq.analyze(prompt, system=None)
+                resp = await self._cerebras.analyze(prompt, system=None)
                 return self._parse_llm_answer(resp.text or "")
             except Exception as exc:
-                log.warning("Groq invalidation query failed: %s", exc)
+                log.warning("Cerebras invalidation query failed: %s", exc)
 
-        if self._ollama:
-            resp = await self._ollama.analyze(prompt, system=None)
+        if self._groq:
+            resp = await self._groq.analyze(prompt, system=None)
             return self._parse_llm_answer((resp.text or "").strip())
 
         return InvalidationResult(met=False, reason="No LLM available")

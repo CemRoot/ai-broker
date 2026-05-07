@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.logging import get_logger
@@ -48,6 +48,8 @@ class MarketClock:
         self.premarket_tick_seconds = max(30, int(premarket_tick_seconds))
         self.regular_tick_seconds = max(60, int(regular_tick_seconds))
         self._cal = None
+        self._fired_event_day: date | None = None
+        self._fired_events: set[str] = set()
 
     def _calendar(self):
         if self._cal is None:
@@ -85,6 +87,25 @@ class MarketClock:
         hh, mm = when_et.split(":")
         return day_et.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
 
+    def _reset_fired_events(self, now: datetime) -> None:
+        today = now.date()
+        if self._fired_event_day != today:
+            self._fired_event_day = today
+            self._fired_events = set()
+
+    def _next_unfired_event(self, now: datetime) -> MarketEvent | None:
+        for ev in self.EVENTS:
+            if ev.event_type in self._fired_events:
+                continue
+            dt = self._event_dt_on_day(now, ev.when_et)
+            if dt <= now:
+                return ev
+        return None
+
+    def _mark_fired(self, event_type: str) -> None:
+        if event_type:
+            self._fired_events.add(event_type)
+
     def next_decision_event(self, when: datetime | None = None) -> tuple[datetime, str]:
         """Return (datetime_et, event_type) for the next decision moment."""
         now = when or self.now_et()
@@ -115,15 +136,22 @@ class MarketClock:
         - TICK: regular low-frequency tick during session
         """
         now = self.now_et()
+        self._reset_fired_events(now)
 
         # Critical ordering: during regular session, next_open() points to the NEXT day.
         # If we compute premarket window first, we can accidentally sleep all day.
         if self.is_market_open(now):
+            pending = self._next_unfired_event(now)
+            if pending:
+                self._mark_fired(pending.event_type)
+                return pending.event_type, self.regular_tick_seconds
+
             next_ev_dt, next_ev_type = self.next_decision_event(now)
             to_ev = max(0, int((next_ev_dt - now).total_seconds()))
 
             # If we're at/after the event moment, fire it.
             if to_ev <= 3:
+                self._mark_fired(next_ev_type)
                 return next_ev_type, self.regular_tick_seconds
 
             # Otherwise tick at min(regular_tick, time-to-event)
@@ -159,4 +187,3 @@ class MarketClock:
         sleep_s = max(60, int((sleep_to - now).total_seconds()))
         await asyncio.sleep(sleep_s)
         return "PREMARKET", self.premarket_tick_seconds
-

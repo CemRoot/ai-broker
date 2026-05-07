@@ -23,8 +23,8 @@ from starlette.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
 from app.services.t212.client import T212Client
+from app.services.llm.cerebras_service import CerebrasService
 from app.services.llm.groq_service import GroqService
-from app.services.llm.ollama_service import OllamaService
 from app.bot.app import build_bot_application, install_bot_menu, register_handlers
 from app.api.routes import router as api_router
 from app.web.routes import router as web_router
@@ -108,16 +108,26 @@ async def lifespan(app: FastAPI):
             log.warning("T212 instruments cache prime failed (BUYs will refresh on demand): %s", exc)
 
     # ── LLM services ────────────────────────────────────────────────
+    cerebras_svc = (
+        CerebrasService(settings, http_client=http_client)
+        if (settings.cerebras_enabled and settings.cerebras_api_key)
+        else None
+    )
     groq_svc = GroqService(settings) if (settings.groq_enabled and settings.groq_api_key) else None
-    ollama_svc = OllamaService(settings)
+    if cerebras_svc:
+        log.info("Cerebras service ready — model=%s", cerebras_svc.model)
+    else:
+        if not settings.cerebras_enabled:
+            log.warning("CEREBRAS_ENABLED=false — Cerebras disabled")
+        else:
+            log.warning("CEREBRAS_API_KEY empty — Cerebras disabled")
     if groq_svc:
-        log.info("Groq service ready — model=%s", groq_svc.model)
+        log.info("Groq fallback ready — model=%s", groq_svc.model)
     else:
         if not settings.groq_enabled:
-            log.warning("GROQ_ENABLED=false — Groq disabled, Ollama-only mode")
+            log.warning("GROQ_ENABLED=false — Groq disabled")
         else:
-            log.warning("GROQ_API_KEY empty — Groq disabled, Ollama-only mode")
-    log.info("Ollama fallback ready — model=%s host=%s", ollama_svc.model, settings.ollama_base_url)
+            log.warning("GROQ_API_KEY empty — Groq disabled")
 
     # ── RAG retriever (must exist before Telegram handler registration) ──
     # register_handlers stores ``retriever`` in ``bot_data``. Previously it was
@@ -153,8 +163,8 @@ async def lifespan(app: FastAPI):
             settings=settings,
             db=supabase_db,
             http_client=http_client,
+            cerebras=cerebras_svc,
             groq=groq_svc,
-            ollama=ollama_svc,
             retriever=retriever,
             paper_broker=paper_broker,
             screener=screener,
@@ -165,8 +175,8 @@ async def lifespan(app: FastAPI):
     punishment_engine = PunishmentEngine(db=supabase_db, retriever=retriever)
     position_monitor = PositionMonitor(
         paper_broker=paper_broker,
+        cerebras=cerebras_svc,
         groq=groq_svc,
-        ollama=ollama_svc,
         tool_executor=tool_executor,
         t212=t212,
         paper_executes_on_t212=settings.paper_executes_on_t212,
@@ -222,8 +232,8 @@ async def lifespan(app: FastAPI):
             settings=settings,
             db=supabase_db,
             paper_broker=paper_broker,
+            cerebras=cerebras_svc,
             groq=groq_svc,
-            ollama=ollama_svc,
             retriever=retriever,
             tool_executor=tool_executor,
             market_clock=market_clock,
@@ -238,8 +248,8 @@ async def lifespan(app: FastAPI):
         register_handlers(
             bot_app,
             t212=t212,
+            cerebras=cerebras_svc,
             groq=groq_svc,
-            ollama=ollama_svc,
             retriever=retriever,
             settings=settings,
             http_client=http_client,
@@ -354,8 +364,8 @@ async def lifespan(app: FastAPI):
     app.state.embedder = embedder
     app.state.retriever = retriever
     app.state.t212 = t212
+    app.state.cerebras = cerebras_svc
     app.state.groq = groq_svc
-    app.state.ollama = ollama_svc
     app.state.bot_app = bot_app
     app.state.settings = settings
     app.state.http_client = http_client

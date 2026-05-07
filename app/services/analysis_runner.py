@@ -132,8 +132,8 @@ async def run_symbol_analysis(
     settings: Settings,
     http_client,
     t212,
+    cerebras,
     groq,
-    ollama,
     retriever=None,
     include_news: bool = False,
     include_extended_technical: bool = False,
@@ -192,9 +192,8 @@ async def run_symbol_analysis(
                     news_articles, news_model = await analyze_news_batch(
                         symbol=sym,
                         articles=raw,
+                        cerebras=cerebras,
                         groq=groq,
-                        ollama=ollama,
-                        prefer_local=bool(getattr(settings, "prefer_local_llm", False)),
                     )
                     news_digest = _build_news_digest(news_articles)
                     rel = [m for m in news_articles if m.get("relevant")][:5]
@@ -254,40 +253,39 @@ async def run_symbol_analysis(
     llm_text = ""
     llm_model = "none"
 
-    prefer_local = bool(getattr(settings, "prefer_local_llm", False))
-    if groq and not prefer_local:
+    if cerebras:
+        try:
+            resp = await cerebras.analyze(user_msg, system=_ANALYSIS_SYSTEM)
+            llm_text = resp.text
+            llm_model = resp.model
+        except Exception as exc:
+            log.warning("Cerebras analyze failed: %s", exc)
+            await fire_operator_alert(
+                category="LLM · Cerebras",
+                summary=f"run_symbol_analysis({sym}): Cerebras failed — trying Groq.",
+                detail=format_exc_brief(exc),
+                dedupe_key="llm_cerebras_analyze_path",
+            )
+
+    if not llm_text and groq:
         try:
             resp = await groq.analyze(user_msg, system=_ANALYSIS_SYSTEM)
             llm_text = resp.text
             llm_model = resp.model
         except Exception as exc:
-            log.warning("Groq analyze failed: %s", exc)
+            log.error("Groq analyze failed: %s", exc)
             await fire_operator_alert(
                 category="LLM · Groq",
-                summary=f"run_symbol_analysis({sym}): Groq failed — trying Ollama.",
+                summary=f"run_symbol_analysis({sym}): Groq failed after Cerebras miss.",
                 detail=format_exc_brief(exc),
                 dedupe_key="llm_groq_analyze_path",
-            )
-
-    if not llm_text and ollama:
-        try:
-            resp = await ollama.analyze(user_msg, system=_ANALYSIS_SYSTEM)
-            llm_text = resp.text
-            llm_model = resp.model
-        except Exception as exc:
-            log.error("Ollama analyze failed: %s", exc)
-            await fire_operator_alert(
-                category="LLM · Ollama",
-                summary=f"run_symbol_analysis({sym}): Ollama failed after Groq miss.",
-                detail=format_exc_brief(exc),
-                dedupe_key="llm_ollama_analyze_path",
             )
             llm_text = f"⚠️ LLM error: {exc}"
 
     if not llm_text:
         await fire_operator_alert(
             category="LLM · Analyze",
-            summary=f"run_symbol_analysis({sym}): no LLM response (Groq/Ollama unavailable).",
+            summary=f"run_symbol_analysis({sym}): no LLM response (Cerebras/Groq unavailable).",
             dedupe_key="llm_analyze_no_output",
         )
         llm_text = "⚠️ No LLM available."
