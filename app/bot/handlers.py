@@ -278,17 +278,22 @@ async def portfolio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _send_long(update, "📭 Açık pozisyon yok.")
         return
 
-    lines = ["📊 *Açık Pozisyonlar*\n", f"_Hesap para birimi: {acct_cur}_\n"]
+    lines = [
+        "📊 <b>Açık Pozisyonlar</b>",
+        f"<i>Hesap para birimi: {html.escape(acct_cur)}</i>",
+        "",
+    ]
     for p in positions:
         emoji = "🟢" if p.pnl >= 0 else "🔴"
         yf_sym = t212_to_yfinance(p.ticker)
         lines.append(
-            f"{emoji} *{yf_sym}* — {p.quantity:.2f} adet\n"
-            f"   Ort: {p.average_price_paid:.2f} → Güncel: {p.current_price:.2f} (emir fiyatı; US hisse genelde USD)\n"
-            f"   P&L: {p.pnl:+.2f} {acct_cur} ({p.pnl_percent:+.1f}%)"
+            f"{emoji} <b>{html.escape(yf_sym)}</b> — <code>{p.quantity:.2f}</code> adet\n"
+            f"Ort: <code>{p.average_price_paid:.2f}</code> → Güncel: <code>{p.current_price:.2f}</code> "
+            f"<i>(emir fiyatı; US hisse genelde USD)</i>\n"
+            f"P&amp;L: <b>{p.pnl:+.2f} {html.escape(acct_cur)}</b> ({p.pnl_percent:+.1f}%)"
         )
 
-    await _send_long(update, "\n".join(lines))
+    await _send_long(update, "\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 async def analyze_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

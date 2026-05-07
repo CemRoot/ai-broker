@@ -44,6 +44,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`2026-05-07T12:54:00+01:00`:** **Telegram `/portfolio` kartı HTML formatına geçirildi.** `app/bot/handlers.py` `portfolio_handler` artık markdown işaretleri (`*`, `_`) yerine `ParseMode.HTML` ile başlık/para birimi/pozisyon satırlarını profesyonel ve tutarlı biçimde render eder.
+
 - **`2026-05-07T12:53:00+01:00`:** **PaperAgent canlı feed kartları görsel olarak profesyonelleştirildi.** `app/agents/paper_agent.py` içinde PREMARKET/TICK ve normal cycle Telegram mesaj şablonları sade başlık + section düzenine taşındı (`Market status`, `Risk snapshot`, `Macro`, `Decisions`, `NAV/Cash`). Uzun “Portfolio risk snapshot” satırı regex ile kompaktlaştırıldı (`NAV/Peak/Drawdown/limit`), decision satırları daha okunur tipografiye geçirildi.
 
 - **`2026-05-07T12:49:00+01:00`:** **Telegram `/paper log` çıktısı profesyonel HTML karta geçirildi.** Ham markdown/artık yıldızlar yerine `ParseMode.HTML` ile başlık + analiz + karar JSON bölümleri ayrı `<pre>` bloklarda gösterilir; uzun içerik güvenli şekilde kısaltılır.
