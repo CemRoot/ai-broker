@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -1548,18 +1549,21 @@ Return JSON decisions array.
         if not is_emergency and event_type in ("PREMARKET", "TICK"):
             clk = _paper_agent_clock_header(self.deps.settings, with_seconds=False)
             parts = [
-                f"🤖 <b>AI Broker</b> · <code>{html.escape(event_type)}</code> · {html.escape(clk)}",
-                "⏸ <i>Pre-market / between-event</i> — no broker orders (OPEN / MIDDAY / CLOSE ET only).",
-                "Full cycle → Supabase <code>daily_reports</code> · <code>/paper log</code>",
+                f"🤖 <b>AI Broker</b> · <b>{html.escape(event_type)}</b> · <code>{html.escape(clk)}</code>",
+                "⏸ <b>Market status:</b> Pre-market / between-event",
+                "<i>No broker orders in this window (orders run on OPEN / MIDDAY / CLOSE ET).</i>",
+                "🗂 <b>Full cycle log:</b> <code>/paper log</code>",
             ]
             if decisions:
-                parts.append("<b>Snapshot (max 3)</b>")
+                parts.append("")
+                parts.append("📌 <b>Snapshot (top 3)</b>")
                 for d in decisions[:3]:
                     t = str(d.get("ticker", "")).upper().strip()
                     a = str(d.get("action", "")).upper().strip()
-                    parts.append(f"• <b>{html.escape(t)}</b> · <code>{html.escape(a)}</code>")
+                    parts.append(f"• <code>{html.escape(t)}</code> — <b>{html.escape(a)}</b>")
             else:
-                parts.append("(No decision rows.)")
+                parts.append("")
+                parts.append("📌 <i>No decision rows.</i>")
             msg = "\n".join(parts)
             for uid in allowed:
                 try:
@@ -1603,19 +1607,20 @@ Return JSON decisions array.
 
         sub: list[str] = []
         if nav_summary_line:
-            sub.append(html.escape(nav_summary_line[:350] + ("…" if len(nav_summary_line) > 350 else "")))
+            compact_risk = self._compact_risk_snapshot(nav_summary_line)
+            sub.append(f"🧾 <b>Risk snapshot:</b> {html.escape(compact_risk)}")
         if macro_snippet:
             m = macro_snippet.replace("\n", " ").strip()
-            if len(m) > 280:
-                m = m[:280] + "…"
+            if len(m) > 220:
+                m = m[:220] + "…"
             sub.append(f"📊 <b>Macro</b>: {html.escape(m)}")
         if sub:
-            head = head + "\n" + "—" * 24 + "\n" + "\n".join(sub)
+            head = head + "\n\n" + "\n".join(sub)
 
         if not decisions:
             msg = head + "\n\nNo decisions."
         else:
-            lines = [head, "—" * 24]
+            lines = [head, "", "🧠 <b>Decisions</b>"]
             for d in decisions[:5]:
                 t = str(d.get("ticker", "")).upper().strip()
                 a = str(d.get("action", "")).upper().strip()
@@ -1625,22 +1630,22 @@ Return JSON decisions array.
                 if hyp and len(hyp) > 140:
                     hyp = hyp[:140] + "…"
                 conf_s = f"{float(conf):.2f}" if conf is not None else "N/A"
-                edge_s = f" | {edge}" if edge else ""
+                edge_s = f" · {edge}" if edge else ""
                 lines.append(
-                    f"<b>{html.escape(t)}</b> · <code>{html.escape(a)}</code> · "
-                    f"conf=<code>{html.escape(conf_s)}</code>{html.escape(edge_s)}"
+                    f"• <code>{html.escape(t)}</code> · <b>{html.escape(a)}</b> · "
+                    f"conf <code>{html.escape(conf_s)}</code>{html.escape(edge_s)}"
                 )
                 if hyp:
-                    lines.append(f"  {html.escape(hyp)}")
+                    lines.append(f"  <i>{html.escape(hyp)}</i>")
             try:
                 nav_now, cash_now, _ = await self._estimate_nav_mtm()
                 start = float(self.deps.settings.paper_starting_nav_usd)
                 ret_pct = (nav_now - start) / start * 100.0 if start else 0.0
                 ac = (account_currency or "USD").upper()[:3]
-                lines.append("—" * 24)
+                lines.append("")
                 lines.append(
-                    f"📊 <b>NAV</b> ~{nav_now:,.0f} {ac} ({ret_pct:+.1f}% vs {start:,.0f} {ac} start) · "
-                    f"<b>Cash</b> {cash_now:,.0f} {ac}"
+                    f"💼 <b>NAV:</b> {nav_now:,.0f} {ac} ({ret_pct:+.1f}% vs {start:,.0f} start) · "
+                    f"<b>Cash:</b> {cash_now:,.0f} {ac}"
                 )
             except Exception:
                 pass
@@ -1652,6 +1657,23 @@ Return JSON decisions array.
             except Exception:
                 # Don't spam logs for transient errors.
                 pass
+
+    @staticmethod
+    def _compact_risk_snapshot(text: str) -> str:
+        raw = (text or "").strip().replace("\n", " ")
+        if not raw:
+            return "N/A"
+        m = re.search(
+            r"est NAV\s+([0-9,\.]+\s+[A-Z]{3}).*?peak NAV\s+([0-9,\.]+\s+[A-Z]{3}).*?drawdown\s+([0-9\.\-]+%).*?limit\s+([0-9\.\-]+%)",
+            raw,
+            re.IGNORECASE,
+        )
+        if m:
+            return (
+                f"NAV {m.group(1)} · Peak {m.group(2)} · "
+                f"Drawdown {m.group(3)} (limit {m.group(4)})"
+            )
+        return raw[:220] + ("…" if len(raw) > 220 else "")
 
     @staticmethod
     def _fetch_yf_price(symbol: str) -> float | None:
