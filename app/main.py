@@ -238,6 +238,7 @@ async def lifespan(app: FastAPI):
             paper_broker=paper_broker,
             cerebras=cerebras_svc,
             groq=groq_svc,
+            ollama=ollama_svc,
             retriever=retriever,
             tool_executor=tool_executor,
             market_clock=market_clock,
