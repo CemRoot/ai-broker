@@ -415,6 +415,13 @@ Use tools to gather data. Follow the trading rules.
         for _d in decisions:
             _a = str(_d.get("action", "")).upper().strip() or "UNKNOWN"
             action_counts[_a] = action_counts.get(_a, 0) + 1
+        log.info(
+            "Paper cycle parsed | event=%s allow_trades=%s decisions=%d action_counts=%s",
+            event_type,
+            allow_trades,
+            len(decisions),
+            action_counts,
+        )
         # region agent log
         debug_probe(
             run_id="pre-fix",
@@ -656,6 +663,7 @@ Return JSON decisions array.
             # endregion
             return None
         if not ticker or action not in ("BUY", "SELL", "HOLD", "SKIP"):
+            log.warning("Skipping decision: invalid action/ticker | ticker=%r action=%r", ticker, action)
             # region agent log
             debug_probe(
                 run_id="pre-fix",
@@ -669,6 +677,12 @@ Return JSON decisions array.
 
         confidence = float(d.get("confidence", 0.0) or 0.0)
         if confidence < 0.60 and action in ("BUY", "SELL"):
+            log.warning(
+                "Skipping %s %s: confidence gate %.2f < 0.60",
+                action,
+                ticker,
+                confidence,
+            )
             # region agent log
             debug_probe(
                 run_id="pre-fix",
@@ -682,6 +696,12 @@ Return JSON decisions array.
 
         shares = float(d.get("shares", 0.0) or 0.0)
         if action in ("BUY", "SELL") and shares <= 0:
+            log.warning(
+                "Skipping %s %s: non-positive shares %.4f",
+                action,
+                ticker,
+                shares,
+            )
             # region agent log
             debug_probe(
                 run_id="pre-fix",
