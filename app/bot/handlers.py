@@ -234,6 +234,8 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
         if resp is None and groq:
             resp = await groq.analyze(text, system=system_prompt)
+        if resp is None:
+            raise RuntimeError("LLM unavailable")
         out = _strip_thinking(resp.text if resp else "")[:3500]
         if not out:
             out = "(boş cevap)"

@@ -240,12 +240,15 @@ async def analyze_news_batch(
         prompt = build_batch_prompt(sym, chunk, use_toon=False)
 
         text_out = ""
+        had_provider_error = False
+        groq_error: Exception | None = None
         if cerebras:
             try:
                 resp = await cerebras.analyze(prompt, system=LAYER1_SYSTEM)
                 text_out = resp.text
                 model_used = resp.model
             except Exception as exc:
+                had_provider_error = True
                 log.warning("Cerebras news batch failed: %s", exc)
                 await fire_operator_alert(
                     category="LLM · Cerebras",
@@ -260,6 +263,8 @@ async def analyze_news_batch(
                 text_out = resp.text
                 model_used = resp.model
             except Exception as exc:
+                had_provider_error = True
+                groq_error = exc
                 log.error("Groq news batch failed: %s", exc)
                 await fire_operator_alert(
                     category="LLM · Groq",
@@ -267,14 +272,16 @@ async def analyze_news_batch(
                     detail=format_exc_brief(exc),
                     dedupe_key="llm_groq_news_batch",
                 )
-                raise RuntimeError(f"News batch LLM failed: {exc}") from exc
 
         if not text_out:
-            await fire_operator_alert(
-                category="LLM · News",
-                summary=f"analyze_news_batch({sym}): no LLM output (Cerebras/Groq unavailable).",
-                dedupe_key="llm_news_no_output",
-            )
+            if groq_error:
+                raise RuntimeError(f"News batch LLM failed: {groq_error}") from groq_error
+            if not had_provider_error:
+                await fire_operator_alert(
+                    category="LLM · News",
+                    summary=f"analyze_news_batch({sym}): no LLM output (Cerebras/Groq unavailable).",
+                    dedupe_key="llm_news_no_output",
+                )
             raise RuntimeError("No LLM available for news batch (Cerebras/Groq unavailable)")
 
         scores = parse_layer1_response(text_out, len(chunk))

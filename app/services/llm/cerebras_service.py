@@ -25,7 +25,7 @@ class CerebrasService:
     def __init__(self, settings: Settings, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._api_key = settings.cerebras_api_key
         self.model = settings.cerebras_model
-        self.base_url = (settings.cerebras_base_url or "https://api.cerebras.ai/v1").rstrip("/")
+        self.base_url = settings.cerebras_base_url.rstrip("/")
         self._client = http_client
         self._owns_client = http_client is None
 
