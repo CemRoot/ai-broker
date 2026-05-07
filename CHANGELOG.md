@@ -44,6 +44,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`2026-05-07T12:49:00+01:00`:** **Telegram `/paper log` çıktısı profesyonel HTML karta geçirildi.** Ham markdown/artık yıldızlar yerine `ParseMode.HTML` ile başlık + analiz + karar JSON bölümleri ayrı `<pre>` bloklarda gösterilir; uzun içerik güvenli şekilde kısaltılır.
+
 - **`2026-05-04T15:48:00+01:00`:** **PaperAgent UX + prompt:** cycle `user_message` içinde çift saat bloğu + “Telegram balonu cihaz yereli” notu; PREMARKET/TICK Telegram feed’i kısaltıldı (B1 — emir yok, `/paper log` yönlendirmesi). Sistem prompt: SPY/QQQ makro vs tradeable ayrımı, gereksiz index HOLD azaltma; Faz 0 bölüm 0’da benchmark ETF’ler **macro only**. **Telegram `/help`:** `ParseMode.HTML`, bölüm başlıkları `<b>/<u>`, komutlar `<code>`. Per-trade bildirim footer’ında çift saat.
 
 - **`2026-05-04T15:52:00+01:00`:** **`README.md`** — ortam değişkenleri tablosuna `TELEGRAM_DISPLAY_SECONDARY_TZ` satırı eklendi.

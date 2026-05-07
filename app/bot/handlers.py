@@ -823,7 +823,30 @@ async def paper_log_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     analysis = (last.get("analysis") or "").strip()
     if len(analysis) > 3500:
         analysis = analysis[:3500] + "…"
-    await _send_long(update, f"🧠 *LAST PAPER CYCLE* (UTC: {at}){dd_line}\n{analysis or 'No analysis.'}")
+    decisions = last.get("decisions") or []
+    try:
+        decisions_text = json.dumps(decisions, ensure_ascii=False, indent=2)
+    except Exception:
+        decisions_text = "[]"
+    if len(decisions_text) > 3500:
+        decisions_text = decisions_text[:3500] + "\n... (truncated)"
+
+    body_lines = [
+        f"🧠 <b>LAST PAPER CYCLE</b> <code>{html.escape(str(at))}</code>",
+    ]
+    if dd_line:
+        body_lines.append(f"📉 Drawdown from peak: <b>{html.escape(dd_line.strip().split(':', 1)[-1].strip())}</b>")
+    body_lines.extend(
+        [
+            "",
+            "<b>Analysis</b>",
+            f"<pre>{html.escape(analysis or 'No analysis.')}</pre>",
+            "",
+            "<b>Decisions JSON</b>",
+            f"<pre>{html.escape(decisions_text)}</pre>",
+        ]
+    )
+    await _send_long(update, "\n".join(body_lines), parse_mode=ParseMode.HTML)
 
 
 async def paper_reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
